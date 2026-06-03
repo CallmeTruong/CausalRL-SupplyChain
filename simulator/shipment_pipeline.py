@@ -1,4 +1,3 @@
-
 class ShipmentPipeline:
 
     def __init__(self):
@@ -9,6 +8,7 @@ class ShipmentPipeline:
         quantity: int,
         arrival_day: int
     ):
+
         self.orders.append(
             {
                 "quantity": quantity,
@@ -16,24 +16,30 @@ class ShipmentPipeline:
             }
         )
 
-    def receive(self, current_day):
+    def receive(
+        self,
+        current_day: int
+    ):
 
-        arrived = 0
+        arrived_quantity = 0
 
         remaining_orders = []
 
         for order in self.orders:
 
             if order["arrival_day"] <= current_day:
-                arrived += order["quantity"]
+
+                arrived_quantity += order["quantity"]
+
             else:
+
                 remaining_orders.append(order)
 
         self.orders = remaining_orders
 
-        return arrived
+        return arrived_quantity
 
-    def get_pipeline_quantity(self):
+    def total_pipeline_quantity(self):
 
         return sum(
             order["quantity"]
