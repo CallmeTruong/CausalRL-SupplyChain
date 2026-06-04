@@ -8,11 +8,11 @@ from demand.lightgbm_trainer import load_m5_single
 from demand.feature_engineering import create_features
 
 
-def get_demand_series(cfg):
+def get_env(cfg, seed=0):
     d  = cfg["demand"]
-    df = load_m5_single(d["sales_path"], d["calendar_path"],
-                        d["item_id"], d["store_id"])
-    return create_features(df)["demand"].values
+    df = create_features(load_m5_single(d["sales_path"], d["calendar_path"],
+                                        d["item_id"], d["store_id"]))
+    return SupplyChainEnv(df_history=df, config=cfg, seed=seed)
 
 
 def run_episode(env, model=None) -> dict:
@@ -54,7 +54,7 @@ def base_stock_action(env, target=600, reorder=200):
 
 def evaluate(cfg_path="configs/config.yaml", n_episodes=50):
     cfg           = yaml.safe_load(open(cfg_path))
-    demand_series = get_demand_series(cfg)
+    demand_series = get_env(cfg)
     env           = SupplyChainEnv(demand_series=demand_series, config=cfg)
 
     policies = {

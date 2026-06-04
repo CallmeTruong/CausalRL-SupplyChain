@@ -64,8 +64,8 @@ class SupplyChainEnv(gym.Env):
             item_id    = self._item_id,
             seed       = _seed,
         )
-        # Seed 28 days for start
-        gen.seed_history(self._df_history.head(28))
+        # Seed 56 days for start
+        gen.seed_history(self._df_history.head(56))
 
         self.engine = SupplyChainEngine(
             demand_generator      = gen,

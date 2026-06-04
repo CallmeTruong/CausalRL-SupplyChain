@@ -14,20 +14,18 @@ from demand.lightgbm_trainer import load_m5_single
 from demand.feature_engineering import create_features
 
 
-def get_demand_series(cfg):
-    d  = cfg["demand"]
+
+def get_df(cfg):
+    d = cfg["demand"]
     df = load_m5_single(d["sales_path"], d["calendar_path"],
                         d["item_id"], d["store_id"])
-    return create_features(df)["demand"].values
+    return create_features(df)
 
 
 def make_env_fn(cfg, seed):
     def _init():
-        return SupplyChainEnv(
-            demand_series = get_demand_series(cfg),
-            config        = cfg,
-            seed          = seed,
-        )
+        df = get_df(cfg)
+        return SupplyChainEnv(df_history=df, config=cfg, seed=seed)
     return _init
 
 
@@ -67,7 +65,7 @@ class MetricsCallback(BaseCallback):
 def train(cfg_path="configs/config.yaml", resume_path=None):
     cfg = yaml.safe_load(open(cfg_path))
     rl  = cfg["rl"]
-
+    
     train_env = make_vec_env(make_env_fn(cfg, seed=42), n_envs=4)
     eval_env  = make_vec_env(make_env_fn(cfg, seed=99), n_envs=1)
 

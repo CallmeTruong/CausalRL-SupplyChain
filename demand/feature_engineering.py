@@ -19,8 +19,7 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0
 
-    return df.dropna().reset_index(drop=True)
-
+    return df.dropna(subset=FEATURE_COLS).reset_index(drop=True)
 
 FEATURE_COLS = [
     "lag_1", "lag_7", "lag_14", "lag_28",
