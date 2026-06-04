@@ -12,7 +12,7 @@ def load_m5_multi(sales_path, calendar_path, n_items=50, store_id="CA_1"):
     sales    = pd.read_csv(sales_path)
     calendar = pd.read_csv(calendar_path, parse_dates=["date"])
 
-    # Lấy n_items đầu tiên của store_id
+    # get n_items of store_id
     rows = sales[sales["store_id"] == store_id].head(n_items)
 
     day_cols = [c for c in sales.columns if c.startswith("d_")]
@@ -76,7 +76,7 @@ def train(cfg: dict):
         dfs.append(tmp)
 
     df = pd.concat(dfs, ignore_index=True)
-    
+
     #train/val
     cutoff  = df["date"].quantile(0.8)
     X_train = df[df["date"] <= cutoff][MULTI_FEATURE_COLS]
