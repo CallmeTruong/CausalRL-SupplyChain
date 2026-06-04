@@ -1,21 +1,19 @@
 import numpy as np
+import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 
 from simulator.supply_chain_engine import SupplyChainEngine
 from simulator.disruption_engine import DisruptionEngine
+from demand.demand_generator import DemandGenerator
 from causal.scm import SCM
 from causal.counterfactual_engine import CounterfactualEngine
 
 
 class SupplyChainEnv(gym.Env):
-    """
-    Observation: 23 dims = base(10) + disruption(5) + counterfactual(8)
-    Action:      discrete, N level order from 0 to max_order
-    Reward:      service_level_bonus - cost_penalty
-    """
 
-    def __init__(self, demand_series, config: dict, seed=None):
+    def __init__(self, df_history: pd.DataFrame, config: dict, seed=None):
+
         super().__init__()
 
         sim = config["simulation"]
@@ -24,15 +22,20 @@ class SupplyChainEnv(gym.Env):
 
         self.episode_length = sim["episode_length"]
         self.max_order      = rl["max_order"]
-        self.order_levels   = np.linspace(0, rl["max_order"], rl["n_order_levels"], dtype=int)
+        self.order_levels   = np.linspace(0, rl["max_order"],
+                                          rl["n_order_levels"], dtype=int)
 
         self.action_space      = spaces.Discrete(rl["n_order_levels"])
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(23,), dtype=np.float32)
+        self.observation_space = spaces.Box(-np.inf, np.inf,
+                                            shape=(23,), dtype=np.float32)
 
-        self._demand_series = np.array(demand_series)
-        self._sim_cfg       = sim
-        self._dis_cfg       = dis
-        self._seed          = seed
+        self._df_history = df_history
+        self._dates      = df_history["date"].values
+        self._sim_cfg    = sim
+        self._dis_cfg    = dis
+        self._model_path = config["demand"]["model_path"]
+        self._item_id    = config["demand"]["item_id"]
+        self._seed       = seed
 
         scm = SCM(
             base_lead_time   = sim["base_lead_time"],
@@ -47,16 +50,26 @@ class SupplyChainEnv(gym.Env):
             horizon      = rl["cf_horizon"],
         )
 
-        self.engine       = None
-        self._step_count  = 0
-        self._recent_demands = []
+        self.engine      = None
+        self._step_count = 0
+        self._last_forecast = 50.0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         _seed = seed or self._seed
 
+        # generate new DemandGenerator each episode
+        gen = DemandGenerator(
+            model_path = self._model_path,
+            item_id    = self._item_id,
+            seed       = _seed,
+        )
+        # Seed 28 days for start
+        gen.seed_history(self._df_history.head(28))
+
         self.engine = SupplyChainEngine(
-            demand_series         = self._demand_series,
+            demand_generator      = gen,
+            dates                 = self._dates,
             disruption_engine     = DisruptionEngine(
                 mean_inter_arrival = self._dis_cfg["mean_inter_arrival"],
                 seed               = _seed,
@@ -65,23 +78,28 @@ class SupplyChainEnv(gym.Env):
             seed = _seed,
         )
         self.engine.reset()
-        self._step_count     = 0
-        self._recent_demands = []
+        self._step_count    = 0
+        self._last_forecast = 50.0
 
-        obs = self._get_obs(demand=50.0, lead_time=float(self._sim_cfg["base_lead_time"]),
-                            dis_lead_delta=0.0, dis_demand_mult=1.0, capacity_ratio=1.0)
+        obs = self._get_obs(
+            demand          = 50.0,
+            demand_forecast = 50.0,
+            lead_time       = float(self._sim_cfg["base_lead_time"]),
+            dis_lead_delta  = 0.0,
+            dis_demand_mult = 1.0,
+            capacity_ratio  = 1.0,
+        )
         return obs, {}
 
     def step(self, action: int):
-        order  = int(self.order_levels[action])
-        info   = self.engine.step(order)
+        order = int(self.order_levels[action])
+        info  = self.engine.step(order)
 
-        self._recent_demands.append(info["demand"])
-        if len(self._recent_demands) > 7:
-            self._recent_demands.pop(0)
+        self._last_forecast = info["demand_forecast"]
 
         obs = self._get_obs(
             demand          = float(info["demand"]),
+            demand_forecast = float(info["demand_forecast"]),
             lead_time       = float(info["lead_time"]),
             dis_lead_delta  = float(info["dis_lead_delta"]),
             dis_demand_mult = float(info["dis_demand_mult"]),
@@ -96,19 +114,19 @@ class SupplyChainEnv(gym.Env):
 
     # ---------- private ----------
 
-    def _get_obs(self, demand, lead_time, dis_lead_delta, dis_demand_mult, capacity_ratio):
-        e           = self.engine
-        max_inv     = self._sim_cfg["initial_inventory"] * 3
-        max_lt      = self._sim_cfg["base_lead_time"] + 20
-        demand_mean = float(np.mean(self._recent_demands)) if self._recent_demands else 50.0
+    def _get_obs(self, demand, demand_forecast, lead_time,
+                 dis_lead_delta, dis_demand_mult, capacity_ratio):
+        e       = self.engine
+        max_inv = self._sim_cfg["initial_inventory"] * 3
+        max_lt  = self._sim_cfg["base_lead_time"] + 20
 
         base = np.array([
             e.inventory / max_inv,
             e.backlog   / max_inv,
             e.pipeline.total_pipeline_quantity() / max_inv,
-            demand / max(demand_mean * 3, 1),
-            demand_mean / max_inv,
-            lead_time / max_lt,
+            demand          / max(demand_forecast * 3, 1),
+            demand_forecast / max_inv,
+            lead_time  / max_lt,
             dis_lead_delta / 20.0,
             self._step_count / self.episode_length,
             np.sin(2 * np.pi * self._step_count / 7),
@@ -122,7 +140,7 @@ class SupplyChainEnv(gym.Env):
             backlog         = float(e.backlog),
             lead_time       = lead_time,
             demand          = demand,
-            demand_forecast = demand_mean,
+            demand_forecast = demand_forecast,   # dùng forecast thực từ LightGBM
             dis_lead_delta  = dis_lead_delta,
             dis_demand_mult = dis_demand_mult,
             capacity_ratio  = capacity_ratio,
@@ -131,8 +149,9 @@ class SupplyChainEnv(gym.Env):
         return np.concatenate([base, dis_vec, cf_vec])
 
     def _reward(self, info: dict) -> float:
-        service_bonus    =  5.0 * info["service_level"]
-        cost_penalty     =  info["total_cost"] / 1000.0
+        service_bonus    = 5.0 * info["service_level"]
+        cost_penalty     = info["total_cost"] / 1000.0
         disruption_bonus = (1.0 if info["dis_type"] != 0
                             and info["service_level"] > 0.9 else 0.0)
-        return float(np.clip(service_bonus - cost_penalty + disruption_bonus, -10.0, 10.0))
+        return float(np.clip(service_bonus - cost_penalty + disruption_bonus,
+                             -10.0, 10.0))
