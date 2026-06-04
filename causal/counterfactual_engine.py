@@ -65,9 +65,9 @@ class CounterfactualEngine:
             min(stockout_rates),                         # best-case stockout rate
             max(service_levels),                         # best-case service level
             min(total_costs) / 1000.0,                   # best-case cost
-            stockout_rates[mid_idx],                     # stockout nếu order trung bình
-            avg_inventories[best_idx] / 500.0,           # inventory tại optimal
-            cost_sens,                                   # độ nhạy của cost theo action
-            float(np.mean([s > 0.1 for s in stockout_rates])),  # % candidate có rủi ro
+            stockout_rates[mid_idx],                     # stockout if order mean
+            avg_inventories[best_idx] / 500.0,           # inventory at optimal
+            cost_sens,                                   # sens of cost/ action
+            float(np.mean([s > 0.1 for s in stockout_rates])),  # % candidate with risk
             float(self.candidates[best_idx]) / float(max(self.candidates)),  # optimal order
         ], dtype=np.float32), -5.0, 5.0)
