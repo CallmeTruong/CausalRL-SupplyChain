@@ -1,31 +1,30 @@
 import pandas as pd
 
-def create_features(df):
 
-    df = df.copy()
+def create_features(df: pd.DataFrame) -> pd.DataFrame:
 
-    df["lag_1"] = df["demand"].shift(1)
+    df = df.copy().sort_values("date").reset_index(drop=True)
 
-    df["lag_7"] = df["demand"].shift(7)
+    for lag in [1, 7, 14, 28]:
+        df[f"lag_{lag}"] = df["demand"].shift(lag)
 
-    df["lag_14"] = df["demand"].shift(14)
+    for w in [7, 28]:
+        df[f"rolling_mean_{w}"] = df["demand"].shift(1).rolling(w).mean()
 
-    df["lag_28"] = df["demand"].shift(28)
+    df["day_of_week"]  = df["date"].dt.dayofweek
+    df["month"]        = df["date"].dt.month
+    df["week_of_year"] = df["date"].dt.isocalendar().week.astype(int)
 
-    df["rolling_mean_7"] = (
-        df["demand"]
-        .rolling(7)
-        .mean()
-    )
+    for col in ["snap", "is_holiday"]:
+        if col not in df.columns:
+            df[col] = 0
 
-    df["rolling_mean_28"] = (
-        df["demand"]
-        .rolling(28)
-        .mean()
-    )
+    return df.dropna().reset_index(drop=True)
 
-    df["day_of_week"] = df["date"].dt.dayofweek
 
-    df["month"] = df["date"].dt.month
-
-    return df.dropna()
+FEATURE_COLS = [
+    "lag_1", "lag_7", "lag_14", "lag_28",
+    "rolling_mean_7", "rolling_mean_28",
+    "day_of_week", "month", "week_of_year",
+    "snap", "is_holiday",
+]
