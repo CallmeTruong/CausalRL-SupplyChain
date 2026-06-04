@@ -12,11 +12,12 @@ disruption:
   mean_inter_arrival: 60
 
 demand:
-  sales_path: "data/raw/sales_train_evaluation.csv"
+  sales_path:    "data/raw/sales_train_evaluation.csv"
   calendar_path: "data/raw/calendar.csv"
-  item_id: "FOODS_3_090"
-  store_id: "CA_1"
-  model_path: "models/demand_lgbm.pkl"
+  store_id:      "CA_1"
+  n_items:       50
+  item_id:       "FOODS_3_090"
+  model_path:    "models/demand_lgbm.pkl"
 
 rl:
   max_order: 500
