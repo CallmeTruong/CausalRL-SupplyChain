@@ -1,11 +1,25 @@
 simulation:
-
   initial_inventory: 500
-
-  lead_time: 7
-
+  base_lead_time: 7
+  max_supplier_capacity: 1000
   holding_cost: 0.5
+  stockout_penalty: 10.0
+  order_cost_fixed: 2.0
+  order_cost_variable: 0.1
+  episode_length: 365
 
-  stockout_penalty: 10
+disruption:
+  mean_inter_arrival: 60
 
-  order_cost: 2
+demand:
+  sales_path: "data/raw/sales_train_evaluation.csv"
+  calendar_path: "data/raw/calendar.csv"
+  item_id: "FOODS_3_090"
+  store_id: "CA_1"
+  model_path: "models/demand_lgbm.pkl"
+
+rl:
+  max_order: 500
+  n_order_levels: 20
+  cf_horizon: 14
+  cf_n_candidates: 10
