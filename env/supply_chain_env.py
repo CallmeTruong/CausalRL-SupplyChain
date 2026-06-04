@@ -84,7 +84,7 @@ class SupplyChainEnv(gym.Env):
             demand          = float(info["demand"]),
             lead_time       = float(info["lead_time"]),
             dis_lead_delta  = float(info["dis_lead_delta"]),
-            dis_demand_mult = 1.0 + info["dis_capacity_ratio"] * 0,  # included in demand already
+            dis_demand_mult = float(info["dis_demand_mult"]),
             capacity_ratio  = info["capacity"] / self._sim_cfg["max_supplier_capacity"],
         )
         reward = self._reward(info)

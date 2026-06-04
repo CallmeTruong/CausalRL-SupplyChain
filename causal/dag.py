@@ -77,4 +77,4 @@ class CausalDAG:
             print(f"  {n:20s} ← {', '.join(parents)}")
 
 
-DAG = CausalDAG().summary()
+DAG = CausalDAG()

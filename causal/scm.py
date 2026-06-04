@@ -13,10 +13,6 @@ class SCMState:
     noise_demand:     float
 
 
-# Precompute
-ORDER_DESCENDANTS = DAG.descendants("OrderQuantity")
-
-
 class SCM:
 
 
@@ -31,6 +27,7 @@ class SCM:
         self.max_capacity     = max_capacity
         self.holding_cost     = holding_cost
         self.stockout_penalty = stockout_penalty
+        self.order_descendants = DAG.descendants("OrderQuantity")
 
     # ------------------------------------------------------------------
     # Structural equations

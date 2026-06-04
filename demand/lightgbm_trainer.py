@@ -4,7 +4,7 @@ import pandas as pd
 import yaml
 import lightgbm as lgb
 from sklearn.metrics import mean_absolute_error
-from feature_engineering import create_features, FEATURE_COLS
+from demand.feature_engineering import create_features, FEATURE_COLS
 
 
 def load_m5_multi(sales_path, calendar_path, n_items=50, store_id="CA_1"):

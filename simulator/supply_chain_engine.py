@@ -94,6 +94,7 @@ class SupplyChainEngine:
             "dis_days_remaining":dis.days_remaining,
             "dis_lead_delta":    dis.lead_time_delta,
             "dis_capacity_ratio":dis.capacity_ratio,
+            "dis_demand_mult":   dis.demand_mult,
             "service_level":     service_level,
             "total_cost":        total_cost,
             "done":              done,
