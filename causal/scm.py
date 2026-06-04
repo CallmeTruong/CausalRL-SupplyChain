@@ -96,7 +96,7 @@ class SCM:
         )
 
     # ------------------------------------------------------------------
-    # Bước 2+3: Intervention + Prediction
+    # step 2+3: Intervention + Prediction
     # Nodes not in ORDER_DESCENDANTS → calc with noise fixed
     # Nodes in ORDER_DESCENDANTS       → calc with new order
     # ------------------------------------------------------------------
