@@ -38,45 +38,47 @@ class SupplyChainEngine:
         self.pipeline    = ShipmentPipeline()
         self.disruption_engine.reset()
 
+
     def step(self, order_quantity: int) -> dict:
         dis = self.disruption_engine.step()
 
         lead_time = int(self.base_lead_time + dis.lead_time_delta)
         capacity  = int(self.max_supplier_capacity * dis.capacity_ratio)
 
-        # received
-        received        = self.pipeline.receive(self.current_day)
-        self.inventory += received
+        # 1. received
+        received = self.pipeline.receive(self.current_day)
 
-        # Demand from LightGBM
+        # 2. backlog
+        backlog_fulfilled = min(self.backlog, received)
+        self.backlog     -= backlog_fulfilled
+        self.inventory   += (received - backlog_fulfilled)
+
+        # 3. Demand
         date   = self.dates[self.current_day]
         demand = int(self.demand_generator.sample(date) * dis.demand_mult)
 
-        self.demand_generator.record(date, demand)
-
         sales           = min(demand, self.inventory)
         self.inventory -= sales
-        stockout        = demand - sales
-        self.backlog    = max(0, self.backlog + stockout)
+        new_stockout    = max(0, demand - sales)
+        self.backlog   += new_stockout
 
-        # Order
-        actual_order = min(order_quantity, capacity)
+        # 4. Order base on inventory position
+        inventory_position = self.inventory + self.pipeline.total_pipeline_quantity() - self.backlog
+        actual_order       = min(order_quantity, capacity)
         if actual_order > 0:
             self.pipeline.add_order(
                 quantity    = actual_order,
                 arrival_day = self.current_day + lead_time,
             )
 
-        # Cost
-        holding_cost  = self.inventory * self.holding_cost
-        stockout_cost = stockout       * self.stockout_penalty
+        # 5. Cost
+        holding_cost  = self.inventory  * self.holding_cost
+        stockout_cost = new_stockout    * self.stockout_penalty
         order_cost    = (self.order_cost_fixed + self.order_cost_variable * actual_order
                         ) if actual_order > 0 else 0.0
         total_cost    = holding_cost + stockout_cost + order_cost
 
-        service_level = 1.0 if demand == 0 else sales / demand
-
-        # Forecast today
+        service_level   = 1.0 if demand == 0 else sales / demand
         demand_forecast = self.demand_generator.forecast(date)
 
         self.current_day += 1
@@ -86,9 +88,11 @@ class SupplyChainEngine:
             "demand":             demand,
             "demand_forecast":    demand_forecast,
             "inventory":          self.inventory,
+            "inventory_position": inventory_position,
             "backlog":            self.backlog,
+            "backlog_fulfilled":  backlog_fulfilled,
             "received":           received,
-            "stockout":           stockout,
+            "stockout":           new_stockout,
             "actual_order":       actual_order,
             "pipeline_qty":       self.pipeline.total_pipeline_quantity(),
             "lead_time":          lead_time,

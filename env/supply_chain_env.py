@@ -27,7 +27,7 @@ class SupplyChainEnv(gym.Env):
 
         self.action_space      = spaces.Discrete(rl["n_order_levels"])
         self.observation_space = spaces.Box(-np.inf, np.inf,
-                                            shape=(23,), dtype=np.float32)
+                                            shape=(24,), dtype=np.float32)
 
         self._df_history = df_history
         self._dates      = df_history["date"].values
@@ -124,6 +124,7 @@ class SupplyChainEnv(gym.Env):
             e.inventory / max_inv,
             e.backlog   / max_inv,
             e.pipeline.total_pipeline_quantity() / max_inv,
+            (e.inventory + e.pipeline.total_pipeline_quantity() - e.backlog) / max_inv,
             demand          / max(demand_forecast * 3, 1),
             demand_forecast / max_inv,
             lead_time  / max_lt,
@@ -140,7 +141,7 @@ class SupplyChainEnv(gym.Env):
             backlog         = float(e.backlog),
             lead_time       = lead_time,
             demand          = demand,
-            demand_forecast = demand_forecast,   # dùng forecast thực từ LightGBM
+            demand_forecast = demand_forecast,
             dis_lead_delta  = dis_lead_delta,
             dis_demand_mult = dis_demand_mult,
             capacity_ratio  = capacity_ratio,
