@@ -9,16 +9,19 @@ from demand.feature_engineering import create_features
 
 
 def get_item_df_map(cfg: dict) -> dict:
-    d  = cfg["demand"]
+    d         = cfg["demand"]
+    store_ids = d.get("store_ids", [d.get("store_id", "CA_1")])  # backward compatible
+
     df = load_m5_multi(
         sales_path    = d["sales_path"],
         calendar_path = d["calendar_path"],
         n_items       = d.get("n_items", 50),
-        store_id      = d["store_id"],
+        store_ids     = store_ids,
     )
     item_df_map = {}
-    for item_id, g in df.groupby("item_id"):
-        item_df_map[item_id] = create_features(g.copy()).reset_index(drop=True)
+    for (store_id, item_id), g in df.groupby(["store_id", "item_id"]):
+        key = f"{store_id}__{item_id}"
+        item_df_map[key] = create_features(g.copy()).reset_index(drop=True)
     return item_df_map
 
 

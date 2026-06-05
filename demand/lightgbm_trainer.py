@@ -7,30 +7,32 @@ from sklearn.metrics import mean_absolute_error
 from demand.feature_engineering import create_features, FEATURE_COLS
 
 
-def load_m5_multi(sales_path, calendar_path, n_items=50, store_id="CA_1"):
+def load_m5_multi(sales_path, calendar_path, n_items=50, store_ids=None):
+    if store_ids is None:
+        store_ids = ["CA_1"]
 
     sales    = pd.read_csv(sales_path)
     calendar = pd.read_csv(calendar_path, parse_dates=["date"])
 
-    rows = sales[sales["store_id"] == store_id].head(n_items)
-
     day_cols = [c for c in sales.columns if c.startswith("d_")]
     n_days   = len(day_cols)
     dates    = calendar["date"].values[:n_days]
-    snap     = calendar["snap_CA"].values[:n_days]
+    snap_ca  = calendar["snap_CA"].values[:n_days]
     holiday  = (calendar["event_name_1"].fillna("").values[:n_days] != "").astype(int)
 
     all_dfs = []
-    for _, row in rows.iterrows():
-        df = pd.DataFrame({
-            "date":       dates,
-            "demand":     row[day_cols].values.astype(float),
-            "snap":       snap,
-            "is_holiday": holiday,
-            "item_id":    row["item_id"],
-            "store_id":   row["store_id"],
-        })
-        all_dfs.append(df)
+    for store_id in store_ids:
+        rows = sales[sales["store_id"] == store_id].head(n_items)
+        for _, row in rows.iterrows():
+            df = pd.DataFrame({
+                "date":       dates,
+                "demand":     row[day_cols].values.astype(float),
+                "snap":       snap_ca,
+                "is_holiday": holiday,
+                "item_id":    row["item_id"],
+                "store_id":   row["store_id"],
+            })
+            all_dfs.append(df)
 
     return pd.concat(all_dfs, ignore_index=True)
 
@@ -57,14 +59,15 @@ MULTI_FEATURE_COLS = FEATURE_COLS + ["item_encoded"]
 def train(cfg: dict):
     d = cfg["demand"]
 
-    print(f"Loading {d.get('n_items', 50)} items from {d['store_id']}")
+    store_ids = d.get("store_ids", [d.get("store_id", "CA_1")])  # backward compatible
+    print(f"Loading {d.get('n_items', 50)} items x {len(store_ids)} stores")
+
     df = load_m5_multi(
         sales_path    = d["sales_path"],
         calendar_path = d["calendar_path"],
         n_items       = d.get("n_items", 50),
-        store_id      = d["store_id"],
+        store_ids     = store_ids,
     )
-
     item_codes = {item: i for i, item in enumerate(df["item_id"].unique())}
 
     item_stats = {}
