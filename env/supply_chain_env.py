@@ -22,8 +22,7 @@ class SupplyChainEnv(gym.Env):
 
         self.episode_length = sim["episode_length"]
         self.max_order      = rl["max_order"]
-        self.order_levels   = np.linspace(0, rl["max_order"],
-                                          rl["n_order_levels"], dtype=int)
+        self.order_levels = np.linspace(0, rl["max_order"], rl["n_order_levels"], dtype=int)
 
         self.action_space      = spaces.Discrete(rl["n_order_levels"])
         self.observation_space = spaces.Box(-np.inf, np.inf,
@@ -44,11 +43,10 @@ class SupplyChainEnv(gym.Env):
             stockout_penalty = sim["stockout_penalty"],
         )
         self._cf = CounterfactualEngine(
-            scm          = scm,
-            max_order    = rl["max_order"],
-            n_candidates = rl["cf_n_candidates"],
-            horizon      = rl["cf_horizon"],
-        )
+                scm          = scm,
+                order_levels = self.order_levels,
+                horizon      = rl["cf_horizon"],
+            )
 
         self.engine      = None
         self._step_count = 0

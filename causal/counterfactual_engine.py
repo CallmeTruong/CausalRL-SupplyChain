@@ -10,10 +10,10 @@ class CounterfactualEngine:
     3. Prediction — rollout SCM -> 8 features
     """
 
-    def __init__(self, scm: SCM, max_order=500, n_candidates=10, horizon=14):
+    def __init__(self, scm: SCM, order_levels, horizon=14):
         self.scm        = scm
         self.horizon    = horizon
-        self.candidates = np.linspace(0, max_order, n_candidates, dtype=int)
+        self.candidates = order_levels
 
     def compute(
         self,

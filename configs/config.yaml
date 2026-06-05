@@ -1,12 +1,12 @@
 simulation:
-  initial_inventory: 500
-  base_lead_time: 7
+  initial_inventory:     500
+  base_lead_time:        7
   max_supplier_capacity: 1000
-  holding_cost: 0.5
-  stockout_penalty: 10.0
-  order_cost_fixed: 2.0
-  order_cost_variable: 0.1
-  episode_length: 365
+  holding_cost:          0.5
+  stockout_penalty:      10.0
+  order_cost_fixed:      2.0
+  order_cost_variable:   0.1
+  episode_length:        365
 
 disruption:
   mean_inter_arrival: 60
@@ -20,7 +20,17 @@ demand:
   model_path:    "models/demand_lgbm.pkl"
 
 rl:
-  max_order: 500
-  n_order_levels: 20
-  cf_horizon: 14
-  cf_n_candidates: 10
+  max_order:       500
+  n_order_levels:  20
+  cf_horizon:      7
+
+  # PPO hyperparameters
+  total_timesteps: 3_000_000
+  learning_rate:   0.0003
+  n_steps:         2048
+  batch_size:      64
+  n_epochs:        10
+  gamma:           0.99
+  gae_lambda:      0.95
+  clip_range:      0.2
+  ent_coef:        0.01
