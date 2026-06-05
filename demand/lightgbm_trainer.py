@@ -68,7 +68,8 @@ def train(cfg: dict):
         n_items       = d.get("n_items", 50),
         store_ids     = store_ids,
     )
-    item_codes = {}
+    item_codes = {item: i for i, item in enumerate(df["item_id"].unique())}
+
     item_stats = {}
     for i, (_, g) in enumerate(df.groupby(["store_id", "item_id"])):
         row       = g.iloc[0]
@@ -78,6 +79,7 @@ def train(cfg: dict):
             "mean": float(g["demand"].mean()),
             "std":  float(g["demand"].std()),
         }
+
     dfs = []
     for item_id, g in df.groupby("item_id"):
         tmp = create_features(g)
