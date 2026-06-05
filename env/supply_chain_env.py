@@ -120,56 +120,88 @@ class SupplyChainEnv(gym.Env):
 
     # ---------- private ----------
 
-    def _get_obs(self, demand, demand_forecast, lead_time,
-                 dis_lead_delta, dis_demand_mult, capacity_ratio):
-        e       = self.engine
-        gen     = e.demand_generator
-        max_inv = self._sim_cfg["initial_inventory"] * 3
-        max_lt  = self._sim_cfg["base_lead_time"] + 20
+def _get_obs(self, demand, demand_forecast, lead_time,
+             dis_lead_delta, dis_demand_mult, capacity_ratio):
+    e   = self.engine
+    gen = e.demand_generator
 
-        base = np.array([
-            e.inventory / max_inv,
-            e.backlog   / max_inv,
-            e.pipeline.total_pipeline_quantity() / max_inv,
-            (e.inventory + e.pipeline.total_pipeline_quantity() - e.backlog) / max_inv,
-            demand          / max(demand_forecast * 3, 1),
-            demand_forecast / max_inv,
-            lead_time  / max_lt,
-            dis_lead_delta / 20.0,
-            self._step_count / self.episode_length,
-            np.sin(2 * np.pi * self._step_count / 7),
-            np.cos(2 * np.pi * self._step_count / 7),
-        ], dtype=np.float32)
+    # max_inv = cover lead_time * max_order in worst case
+    demand_ref = max(gen.demand_mean, 1.0)
+    max_lt     = self._sim_cfg["base_lead_time"] + 20
 
-        dis_vec = e.disruption_engine.as_vector()
+    inv_scale = demand_ref * (self._sim_cfg["base_lead_time"] + 20) * 20
+    inv_scale = max(inv_scale, self._sim_cfg["initial_inventory"] * 3)
 
-        cf_vec = self._cf.compute(
-            inventory       = float(e.inventory),
-            backlog         = float(e.backlog),
-            lead_time       = lead_time,
-            demand          = demand,
-            demand_forecast = demand_forecast,
-            dis_lead_delta  = dis_lead_delta,
-            dis_demand_mult = dis_demand_mult,
-            capacity_ratio  = capacity_ratio,
-        )
+    inv_norm     = np.tanh(e.inventory / inv_scale)
+    backlog_norm = np.tanh(e.backlog   / inv_scale)
+    pipe_norm    = np.tanh(e.pipeline.total_pipeline_quantity() / inv_scale)
+    pos_norm     = np.tanh(
+        (e.inventory + e.pipeline.total_pipeline_quantity() - e.backlog) / inv_scale
+    )
 
-        # Product context
-        product_ctx = np.array([
-            np.clip(gen.demand_cv, 0.0, 3.0),
-            np.clip(gen.demand_mean / max_inv, 0.0, 1.0),
-            np.clip(self._sim_cfg["base_lead_time"] / max_lt, 0.0, 1.0),  # lead time ratio
-        ], dtype=np.float32)
+    demand_ratio    = demand          / max(demand_ref, 1)
+    forecast_ratio  = demand_forecast / max(demand_ref, 1)
 
-        return np.concatenate([base, dis_vec, cf_vec, product_ctx])
+    base = np.array([
+        inv_norm,
+        backlog_norm,
+        pipe_norm,
+        pos_norm,
+        demand_ratio,
+        forecast_ratio,
+        lead_time       / max_lt,
+        dis_lead_delta  / 20.0,
+        self._step_count / self.episode_length,
+        np.sin(2 * np.pi * self._step_count / 7),
+        np.cos(2 * np.pi * self._step_count / 7),
+    ], dtype=np.float32)
 
-    def _reward(self, info: dict) -> float:
-        expected_daily_cost = (
-            self._sim_cfg["initial_inventory"] * self._sim_cfg["holding_cost"]
-        )
-        service_bonus    = 5.0 * info["service_level"]
-        cost_penalty     = 5.0 * (info["total_cost"] / expected_daily_cost)
-        disruption_bonus = (1.0 if info["dis_type"] != 0
-                            and info["service_level"] > 0.9 else 0.0)
-        return float(np.clip(service_bonus - cost_penalty + disruption_bonus,
-                             -10.0, 10.0))
+    dis_vec = e.disruption_engine.as_vector()
+
+    cf_vec = self._cf.compute(
+        inventory       = float(e.inventory),
+        backlog         = float(e.backlog),
+        lead_time       = lead_time,
+        demand          = demand,
+        demand_forecast = demand_forecast,
+        dis_lead_delta  = dis_lead_delta,
+        dis_demand_mult = dis_demand_mult,
+        capacity_ratio  = capacity_ratio,
+    )
+
+    product_ctx = np.array([
+        np.clip(gen.demand_cv, 0.0, 3.0),
+        np.clip(forecast_ratio / 10.0, 0.0, 1.0),
+        np.clip(self._sim_cfg["base_lead_time"] / max_lt, 0.0, 1.0),
+    ], dtype=np.float32)
+
+    return np.concatenate([base, dis_vec, cf_vec, product_ctx])
+
+
+def _reward(self, info: dict) -> float:
+    gen         = self.engine.demand_generator
+    demand_mean = max(gen.demand_mean, 1.0)
+
+
+    target_inventory    = self._sim_cfg["base_lead_time"] * demand_mean * 2.0
+    baseline_daily_cost = target_inventory * self._sim_cfg["holding_cost"]
+    baseline_daily_cost = max(baseline_daily_cost, 1.0)
+
+    service_bonus = 5.0 * info["service_level"]
+
+    # cost_penalty normalize
+    cost_penalty = 5.0 * (info["total_cost"] / baseline_daily_cost)
+
+    #penalty overstock
+    overstock_threshold = target_inventory * 5.0
+    overstock_penalty   = 0.0
+    if info["inventory"] > overstock_threshold:
+        excess            = info["inventory"] - overstock_threshold
+        overstock_penalty = 2.0 * (excess / overstock_threshold)
+        overstock_penalty = min(overstock_penalty, 3.0)   # cap
+
+    disruption_bonus = (1.0 if info["dis_type"] != 0
+                        and info["service_level"] > 0.9 else 0.0)
+
+    reward = service_bonus - cost_penalty - overstock_penalty + disruption_bonus
+    return float(np.clip(reward, -10.0, 10.0))
