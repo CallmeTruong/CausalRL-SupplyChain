@@ -68,7 +68,7 @@ class SupplyChainEnv(gym.Env):
 
         gen = DemandGenerator(
             model_path = self._model_path,
-            item_id    = self._current_item,
+            item_key    = self._current_item,
             seed       = _seed,
         )
         gen.seed_history(df_history.head(56))
