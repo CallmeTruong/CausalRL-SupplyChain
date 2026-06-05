@@ -102,7 +102,7 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
         )
         # calc remaining steps
         steps_done      = model.num_timesteps
-        steps_remaining = rl.get("total_timesteps", 3_000_000) - steps_done
+        steps_remaining = rl.get("total_timesteps", 1_000_000) - steps_done
         print(f"Already trained: {steps_done:,} | Remaining: {steps_remaining:,}")
     else:
         model = PPO(
@@ -120,7 +120,7 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
             verbose         = 1,
             tensorboard_log = "logs/tensorboard/",
         )
-        steps_remaining = rl.get("total_timesteps", 3_000_000)
+        steps_remaining = rl.get("total_timesteps", 1_000_000)
 
     model.learn(
         total_timesteps   = steps_remaining,
