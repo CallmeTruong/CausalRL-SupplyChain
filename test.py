@@ -3,17 +3,27 @@ import numpy as np
 from stable_baselines3 import PPO
 
 from env.supply_chain_env import SupplyChainEnv
-from demand.lightgbm_trainer import load_m5_single
+from demand.lightgbm_trainer import load_m5_multi
 from demand.feature_engineering import create_features
 
 
 def load_env(cfg, seed=0):
-    d  = cfg["demand"]
-    df = create_features(load_m5_single(
-        d["sales_path"], d["calendar_path"],
-        d["item_id"], d["store_id"]
-    ))
-    return SupplyChainEnv(df_history=df, config=cfg, seed=seed)
+    d         = cfg["demand"]
+    store_ids = d.get("store_ids", [d.get("store_id", "CA_1")])
+
+    df = load_m5_multi(
+        sales_path=d["sales_path"],
+        calendar_path=d["calendar_path"],
+        n_items=d.get("n_items", 50),
+        store_ids=store_ids,
+    )
+
+    item_df_map = {}
+    for (store_id, item_id), g in df.groupby(["store_id", "item_id"]):
+        key = f"{store_id}__{item_id}"
+        item_df_map[key] = create_features(g.copy()).reset_index(drop=True)
+
+    return SupplyChainEnv(item_df_map=item_df_map, config=cfg, seed=seed)
 
 
 def run_inference(model_path="models/best_model", seed=42):
@@ -21,12 +31,14 @@ def run_inference(model_path="models/best_model", seed=42):
     model = PPO.load(model_path)
     env   = load_env(cfg, seed=seed)
 
-    obs, _ = env.reset()
-    done   = False
+    obs, info = env.reset()
+    done      = False
 
     total_cost     = 0.0
     service_levels = []
     log            = []
+
+    print(f"Item: {info.get('item_id', 'unknown')}\n")
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -37,15 +49,15 @@ def run_inference(model_path="models/best_model", seed=42):
         service_levels.append(info["service_level"])
 
         log.append({
-            "day":          len(log) + 1,
-            "inventory":    info["inventory"],
-            "demand":       info["demand"],
-            "order":        info["actual_order"],
-            "stockout":     info["stockout"],
-            "lead_time":    info["lead_time"],
-            "disruption":   info["dis_type"],
-            "service_lvl":  info["service_level"],
-            "cost":         info["total_cost"],
+            "day":         len(log) + 1,
+            "inventory":   info["inventory"],
+            "demand":      info["demand"],
+            "order":       info["actual_order"],
+            "stockout":    info["stockout"],
+            "lead_time":   info["lead_time"],
+            "disruption":  info["dis_type"],
+            "service_lvl": info["service_level"],
+            "cost":        info["total_cost"],
         })
 
         print(
