@@ -28,7 +28,7 @@ class CounterfactualEngine:
             dis_lead_delta      = dis_lead_delta,
         )
 
-        results = self.rollout(
+        results = self.scm.rollout(
             state           = state,
             order_levels    = self.candidates,
             dis_lead_delta  = dis_lead_delta,
