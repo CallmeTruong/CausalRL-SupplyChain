@@ -98,53 +98,62 @@ class SCM:
     # Nodes in ORDER_DESCENDANTS       → calc with new order
     # ------------------------------------------------------------------
 
-    def rollout(self, state, order_quantity, dis_lead_delta,
-                dis_demand_mult, capacity_ratio, horizon=14):
-        inventory  = state.inventory
-        backlog    = state.backlog
-        # Pipeline: list of (quantity, arrival_step)
-        pipeline   = []
+    def rollout(self, state, order_levels, dis_lead_delta,
+                    dis_demand_mult, capacity_ratio, horizon=7):
 
-        stockouts, inventories, costs, service_lvls = [], [], [], []
+        n = len(order_levels)
+
+        inventory  = np.full(n, state.inventory)
+        backlog    = np.full(n, state.backlog)
+        # Pipeline đơn giản: mỗi candidate một giá trị in_transit
+        in_transit = np.zeros(n)
+
+        lead_time = self.scm._lead_time(dis_lead_delta, state.noise_lead_time)
+        demand    = self.scm._demand(state.demand_forecast,
+                                    dis_demand_mult, state.noise_demand)
+        actual_orders = np.minimum(order_levels,
+                                    self.scm.max_capacity * capacity_ratio)
+
+        stockout_counts = np.zeros(n)
+        total_costs     = np.zeros(n)
+        total_svcs      = np.zeros(n)
+        inv_sum         = np.zeros(n)
 
         for step in range(horizon):
+            # received
+            received = np.where(step == int(lead_time), in_transit, 0.0)
+            if step == 0:
+                in_transit = actual_orders
 
-            # not descendants → keep same noise
-            lead_time = self._lead_time(dis_lead_delta, state.noise_lead_time)
-            demand    = self._demand(state.demand_forecast,
-                                    dis_demand_mult, state.noise_demand)
-
-            # received from pipeline
-            received = sum(qty for qty, arr in pipeline if arr == step)
-            pipeline = [(qty, arr) for qty, arr in pipeline if arr != step]
-
-            # return backlog first
-            backlog_fulfilled = min(backlog, received)
-            backlog  -= backlog_fulfilled
-            inventory += (received - backlog_fulfilled)
+            # get backlog
+            bf        = np.minimum(backlog, received)
+            backlog  -= bf
+            inventory += (received - bf)
 
             # sale
-            sales     = min(demand, inventory)
+            sales     = np.minimum(demand, inventory)
             inventory -= sales
-            stockout   = max(0.0, demand - sales)
+            stockout   = np.maximum(0.0, demand - sales)
             backlog   += stockout
 
-            # new order — descendants of OrderQuantity
-            actual_order = self._actual_order(order_quantity, capacity_ratio)
-            arrival      = step + int(lead_time)
-            pipeline.append((actual_order, arrival))
+            # new order
+            pipeline_order = actual_orders
+            arrival        = step + int(lead_time)
 
-            cost = self._total_cost(inventory, stockout, actual_order)
-            svc  = 1.0 if demand == 0 else max(0.0, 1.0 - stockout / demand)
+            cost = (inventory * self.scm.holding_cost
+                + stockout  * self.scm.stockout_penalty
+                + np.where(pipeline_order > 0, 2.0, 0.0))
+            svc  = np.where(demand == 0, 1.0,
+                            np.maximum(0.0, 1.0 - stockout / max(demand, 1)))
 
-            stockouts.append(stockout)
-            inventories.append(inventory)
-            costs.append(cost)
-            service_lvls.append(svc)
+            stockout_counts += (stockout > 0).astype(float)
+            total_costs     += cost
+            total_svcs      += svc
+            inv_sum         += inventory
 
         return {
-            "stockout_rate":   float(np.mean([s > 0 for s in stockouts])),
-            "avg_inventory":   float(np.mean(inventories)),
-            "total_cost":      float(np.sum(costs)),
-            "avg_service_lvl": float(np.mean(service_lvls)),
+            "stockout_rate":   stockout_counts / horizon,
+            "avg_inventory":   inv_sum         / horizon,
+            "total_cost":      total_costs,
+            "avg_service_lvl": total_svcs      / horizon,
         }

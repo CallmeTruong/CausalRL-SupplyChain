@@ -15,20 +15,10 @@ class CounterfactualEngine:
         self.horizon    = horizon
         self.candidates = order_levels
 
-    def compute(
-        self,
-        inventory:       float,
-        backlog:         float,
-        lead_time:       float,
-        demand:          float,
-        demand_forecast: float,
-        dis_lead_delta:  float,
-        dis_demand_mult: float,
-        capacity_ratio:  float,
-    ) -> np.ndarray:
-        """vector 8 dims."""
+    def compute(self, inventory, backlog, lead_time, demand,
+            demand_forecast, dis_lead_delta, dis_demand_mult,
+            capacity_ratio) -> np.ndarray:
 
-        # step 1: Abduction
         state = self.scm.abduct(
             observed_inventory  = inventory,
             observed_backlog    = backlog,
@@ -38,23 +28,19 @@ class CounterfactualEngine:
             dis_lead_delta      = dis_lead_delta,
         )
 
-        # step 2+3: Intervention + Prediction for each candidate
-        results = [
-            self.scm.rollout(
-                state           = state,
-                order_quantity  = int(q),
-                dis_lead_delta  = dis_lead_delta,
-                dis_demand_mult = dis_demand_mult,
-                capacity_ratio  = capacity_ratio,
-                horizon         = self.horizon,
-            )
-            for q in self.candidates
-        ]
+        results = self.rollout_batch(
+            state           = state,
+            order_levels    = self.candidates,
+            dis_lead_delta  = dis_lead_delta,
+            dis_demand_mult = dis_demand_mult,
+            capacity_ratio  = capacity_ratio,
+            horizon         = self.horizon,
+        )
 
-        stockout_rates = [r["stockout_rate"]   for r in results]
-        service_levels = [r["avg_service_lvl"] for r in results]
-        total_costs    = [r["total_cost"]       for r in results]
-        avg_inventories= [r["avg_inventory"]    for r in results]
+        stockout_rates = results["stockout_rate"]
+        service_levels = results["avg_service_lvl"]
+        total_costs    = results["total_cost"]
+        avg_inventories= results["avg_inventory"]
 
         best_idx   = int(np.argmin(total_costs))
         cost_mean  = float(np.mean(total_costs))
@@ -62,12 +48,12 @@ class CounterfactualEngine:
         mid_idx    = len(self.candidates) // 2
 
         return np.clip(np.array([
-            min(stockout_rates),                         # best-case stockout rate
-            max(service_levels),                         # best-case service level
-            min(total_costs) / 1000.0,                   # best-case cost
-            stockout_rates[mid_idx],                     # stockout if order mean
-            avg_inventories[best_idx] / 500.0,           # inventory at optimal
-            cost_sens,                                   # sens of cost/ action
-            float(np.mean([s > 0.1 for s in stockout_rates])),  # % candidate with risk
-            float(self.candidates[best_idx]) / float(max(self.candidates)),  # optimal order
+            float(np.min(stockout_rates)),
+            float(np.max(service_levels)),
+            float(np.min(total_costs)) / 1000.0,
+            float(stockout_rates[mid_idx]),
+            float(avg_inventories[best_idx]) / 500.0,
+            cost_sens,
+            float(np.mean(stockout_rates > 0.1)),
+            float(self.candidates[best_idx]) / float(max(self.candidates)),
         ], dtype=np.float32), -5.0, 5.0)
