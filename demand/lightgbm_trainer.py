@@ -12,7 +12,6 @@ def load_m5_multi(sales_path, calendar_path, n_items=50, store_id="CA_1"):
     sales    = pd.read_csv(sales_path)
     calendar = pd.read_csv(calendar_path, parse_dates=["date"])
 
-    # get n_items of store_id
     rows = sales[sales["store_id"] == store_id].head(n_items)
 
     day_cols = [c for c in sales.columns if c.startswith("d_")]
@@ -68,8 +67,14 @@ def train(cfg: dict):
 
     item_codes = {item: i for i, item in enumerate(df["item_id"].unique())}
 
-    dfs = []
+    item_stats = {}
+    for item_id, g in df.groupby("item_id"):
+        item_stats[item_id] = {
+            "mean": float(g["demand"].mean()),
+            "std":  float(g["demand"].std()),
+        }
 
+    dfs = []
     for item_id, g in df.groupby("item_id"):
         tmp = create_features(g)
         tmp["item_encoded"] = item_codes[item_id]
@@ -77,7 +82,6 @@ def train(cfg: dict):
 
     df = pd.concat(dfs, ignore_index=True)
 
-    #train/val
     cutoff  = df["date"].quantile(0.8)
     X_train = df[df["date"] <= cutoff][MULTI_FEATURE_COLS]
     y_train = df[df["date"] <= cutoff]["demand"]
@@ -106,7 +110,8 @@ def train(cfg: dict):
     artifact = {
         "model":        model,
         "residual_std": residual_std,
-        "item_codes":   item_codes,          # use in inference
+        "item_codes":   item_codes,
+        "item_stats":   item_stats,
         "feature_cols": MULTI_FEATURE_COLS,
     }
     with open(d["model_path"], "wb") as f:

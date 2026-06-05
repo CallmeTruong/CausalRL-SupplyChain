@@ -4,22 +4,30 @@ import pandas as pd
 from stable_baselines3 import PPO
 
 from env.supply_chain_env import SupplyChainEnv
-from demand.lightgbm_trainer import load_m5_single
+from demand.lightgbm_trainer import load_m5_multi
 from demand.feature_engineering import create_features
 
 
-def get_env(cfg, seed=0):
+def get_item_df_map(cfg: dict) -> dict:
     d  = cfg["demand"]
-    df = create_features(load_m5_single(d["sales_path"], d["calendar_path"],
-                                        d["item_id"], d["store_id"]))
-    return SupplyChainEnv(df_history=df, config=cfg, seed=seed)
+    df = load_m5_multi(
+        sales_path    = d["sales_path"],
+        calendar_path = d["calendar_path"],
+        n_items       = d.get("n_items", 50),
+        store_id      = d["store_id"],
+    )
+    item_df_map = {}
+    for item_id, g in df.groupby("item_id"):
+        item_df_map[item_id] = create_features(g.copy()).reset_index(drop=True)
+    return item_df_map
 
 
 def run_episode(env, model=None) -> dict:
-    obs, _  = env.reset()
-    done    = False
-    metrics = {"total_cost": 0.0, "service_levels": [],
-               "stockouts": [], "disruption_days": 0}
+    obs, info = env.reset()
+    item_id   = info.get("item_id", "unknown")
+    done      = False
+    metrics   = {"total_cost": 0.0, "service_levels": [],
+                 "stockouts": [], "disruption_days": 0}
 
     while not done:
         if model is None:
@@ -37,6 +45,7 @@ def run_episode(env, model=None) -> dict:
             metrics["disruption_days"] += 1
 
     return {
+        "item_id":         item_id,
         "total_cost":      metrics["total_cost"],
         "service_level":   float(np.mean(metrics["service_levels"])),
         "stockout_rate":   float(np.mean(metrics["stockouts"])),
@@ -44,53 +53,34 @@ def run_episode(env, model=None) -> dict:
     }
 
 
-def base_stock_action(env, target=600, reorder=200):
-    e        = env.engine
-    position = e.inventory + e.pipeline.total_pipeline_quantity()
-    order    = max(0, target - position) if position < reorder else 0
-    order    = min(order, env.max_order)
-    return int(np.argmin(np.abs(env.order_levels - order)))
-
-
 def evaluate(cfg_path="configs/config.yaml", n_episodes=50):
-    cfg           = yaml.safe_load(open(cfg_path))
-    env = get_env(cfg, seed=0)
+    cfg         = yaml.safe_load(open(cfg_path))
+    item_df_map = get_item_df_map(cfg)
+
+    env = SupplyChainEnv(item_df_map=item_df_map, config=cfg, seed=0)
 
     policies = {
-        "Random":     None,
-        "PPO_Causal": PPO.load("models/best_model"),
+        "Random":        None,
+        "PPO_Universal": PPO.load("models/best_model"),
     }
 
-    print(f"\nEvaluating over {n_episodes} episodes each\n")
+    print(f"\nEvaluating over {n_episodes} episodes each ({len(item_df_map)} items)\n")
 
     for name, model in policies.items():
-        episodes = []
-        for ep in range(n_episodes):
-            env._seed = ep * 10
-            if name == "Base Stock":
-                obs, _ = env.reset()
-                done   = False
-                res    = {"total_cost": 0.0, "service_levels": [], "stockouts": []}
-                while not done:
-                    action = base_stock_action(env)
-                    obs, _, terminated, truncated, info = env.step(action)
-                    done = terminated or truncated
-                    res["total_cost"]      += info["total_cost"]
-                    res["service_levels"].append(info["service_level"])
-                    res["stockouts"].append(info["stockout"] > 0)
-                episodes.append({
-                    "total_cost":    res["total_cost"],
-                    "service_level": float(np.mean(res["service_levels"])),
-                    "stockout_rate": float(np.mean(res["stockouts"])),
-                })
-            else:
-                episodes.append(run_episode(env, model))
+        episodes = [run_episode(env, model) for _ in range(n_episodes)]
+        df       = pd.DataFrame(episodes)
 
-        df = pd.DataFrame(episodes)
-        print(f"{name}:")
+        print(f"{name} — overall:")
         print(f"  service_level : {df['service_level'].mean():.3f} ± {df['service_level'].std():.3f}")
         print(f"  stockout_rate : {df['stockout_rate'].mean():.3f} ± {df['stockout_rate'].std():.3f}")
-        print(f"  total_cost    : {df['total_cost'].mean():.0f} ± {df['total_cost'].std():.0f}\n")
+        print(f"  total_cost    : {df['total_cost'].mean():.0f} ± {df['total_cost'].std():.0f}")
+
+        # Breakdown by item
+        item_summary = (df.groupby("item_id")[["service_level", "stockout_rate", "total_cost"]]
+                          .mean().sort_values("service_level"))
+        print(f"\n  Per-item breakdown (worst 5 service_level):")
+        print(item_summary.head(5).to_string())
+        print()
 
 
 if __name__ == "__main__":

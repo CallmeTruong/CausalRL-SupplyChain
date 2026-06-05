@@ -10,37 +10,38 @@ from stable_baselines3.common.callbacks import (
 )
 
 from env.supply_chain_env import SupplyChainEnv
-from demand.lightgbm_trainer import load_m5_single
+from demand.lightgbm_trainer import load_m5_multi
 from demand.feature_engineering import create_features
 
 
+def get_item_df_map(cfg: dict) -> dict:
+    d  = cfg["demand"]
+    df = load_m5_multi(
+        sales_path    = d["sales_path"],
+        calendar_path = d["calendar_path"],
+        n_items       = d.get("n_items", 50),
+        store_id      = d["store_id"],
+    )
+    item_df_map = {}
+    for item_id, g in df.groupby("item_id"):
+        item_df_map[item_id] = create_features(g.copy()).reset_index(drop=True)
+    return item_df_map
 
-def get_df(cfg):
-    d = cfg["demand"]
-    df = load_m5_single(d["sales_path"], d["calendar_path"],
-                        d["item_id"], d["store_id"])
-    return create_features(df)
 
-
-def make_env_fn(cfg, seed):
+def make_env_fn(cfg, item_df_map, seed):
     def _init():
-        df = get_df(cfg)
-        return SupplyChainEnv(df_history=df, config=cfg, seed=seed)
+        return SupplyChainEnv(item_df_map=item_df_map, config=cfg, seed=seed)
     return _init
 
 
 class MetricsCallback(BaseCallback):
-    """
-    Log add metrics to TensorBoard:
-    service_level, stockout_rate, total_cost, disruption_days.
-    """
+    """Log metrics to TensorBoard: service_level, stockout_rate, total_cost."""
 
     def __init__(self, verbose=0):
         super().__init__(verbose)
         self._episode_metrics = []
 
     def _on_step(self) -> bool:
-        
         for info in self.locals.get("infos", []):
             if "service_level" in info:
                 self._episode_metrics.append({
@@ -52,12 +53,11 @@ class MetricsCallback(BaseCallback):
                 })
 
         svc_demand = [m["svc_demand_only"] for m in self._episode_metrics
-                    if m["svc_demand_only"] is not None]
+                      if m["svc_demand_only"] is not None]
         if svc_demand:
             self.logger.record("supply_chain/service_level_real",
-                            float(np.mean(svc_demand)))
+                               float(np.mean(svc_demand)))
 
-        # Log every n steps
         if len(self._episode_metrics) >= 1000:
             df = pd.DataFrame(self._episode_metrics)
             self.logger.record("supply_chain/service_level", df["service_level"].mean())
@@ -70,13 +70,15 @@ class MetricsCallback(BaseCallback):
 
 
 def train(cfg_path="configs/config.yaml", resume_path=None):
-    cfg = yaml.safe_load(open(cfg_path))
-    rl  = cfg["rl"]
-    
-    train_env = make_vec_env(make_env_fn(cfg, seed=42), n_envs=4)
-    eval_env  = make_vec_env(make_env_fn(cfg, seed=99), n_envs=1)
+    cfg          = yaml.safe_load(open(cfg_path))
+    rl           = cfg["rl"]
+    item_df_map  = get_item_df_map(cfg)
 
-    # save best model
+    print(f"Training universal agent over {len(item_df_map)} items.")
+
+    train_env = make_vec_env(make_env_fn(cfg, item_df_map, seed=42),  n_envs=4)
+    eval_env  = make_vec_env(make_env_fn(cfg, item_df_map, seed=99),  n_envs=1)
+
     eval_callback = EvalCallback(
         eval_env             = eval_env,
         best_model_save_path = "models/",
@@ -86,28 +88,22 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
         deterministic        = True,
         verbose              = 1,
     )
-
-    # save checkpoint every n steps
     checkpoint_callback = CheckpointCallback(
         save_freq   = 25_000,
         save_path   = "models/checkpoints/",
-        name_prefix = "ppo_causal",
+        name_prefix = "ppo_universal",
         verbose     = 1,
     )
-
     metrics_callback = MetricsCallback()
-
     callbacks = [eval_callback, checkpoint_callback, metrics_callback]
 
-    # Resume from checkpoint
     if resume_path:
         print(f"Resuming from {resume_path}")
         model = PPO.load(
             resume_path,
-            env           = train_env,
+            env             = train_env,
             tensorboard_log = "logs/tensorboard/",
         )
-        # calc remaining steps
         steps_done      = model.num_timesteps
         steps_remaining = rl.get("total_timesteps", 1_000_000) - steps_done
         print(f"Already trained: {steps_done:,} | Remaining: {steps_remaining:,}")
@@ -130,19 +126,17 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
         steps_remaining = rl.get("total_timesteps", 1_000_000)
 
     model.learn(
-        total_timesteps   = steps_remaining,
-        callback          = callbacks,
-        reset_num_timesteps = resume_path is None,  # False when resume
-        progress_bar      = True,
+        total_timesteps     = steps_remaining,
+        callback            = callbacks,
+        reset_num_timesteps = resume_path is None,
+        progress_bar        = True,
     )
 
-    model.save("models/ppo_causal_final")
-    print("Saved → models/ppo_causal_final.zip")
+    model.save("models/ppo_universal_final")
+    print("Saved → models/ppo_universal_final.zip")
 
 
 if __name__ == "__main__":
     import sys
-    # Train from start:  python rl/train.py
-    # Resume:       python rl/train.py models/checkpoints/ppo_causal_100000_steps.zip
     resume = sys.argv[1] if len(sys.argv) > 1 else None
     train(resume_path=resume)

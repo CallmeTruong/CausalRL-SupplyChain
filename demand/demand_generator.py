@@ -17,7 +17,15 @@ class DemandGenerator:
         self.rng          = np.random.default_rng(seed)
         self._history     = []
 
-        print(f"DemandGenerator: item_id={item_id}, encoded={self.item_encoded}")
+        # Product context
+        item_stats             = artifact["item_stats"].get(item_id, {})
+        self.demand_mean       = float(item_stats.get("mean", 50.0))
+        self.demand_std        = float(item_stats.get("std",  20.0))
+        self.demand_cv         = (self.demand_std / self.demand_mean
+                                  if self.demand_mean > 0 else 0.5)
+
+        print(f"DemandGenerator: item_id={item_id}, encoded={self.item_encoded}, "
+              f"mean={self.demand_mean:.1f}, cv={self.demand_cv:.2f}")
 
     def seed_history(self, df: pd.DataFrame):
         self._history = df[["date", "demand"]].to_dict("records")
@@ -54,5 +62,5 @@ class DemandGenerator:
 
     def _mean_recent(self):
         if not self._history:
-            return 50.0
+            return self.demand_mean
         return float(np.mean([r["demand"] for r in self._history[-28:]]))
