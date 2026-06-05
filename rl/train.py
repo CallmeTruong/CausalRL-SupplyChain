@@ -48,7 +48,14 @@ class MetricsCallback(BaseCallback):
                     "stockout":      float(info["stockout"] > 0),
                     "total_cost":    info["total_cost"],
                     "dis_active":    float(info["dis_type"] != 0),
+                    "svc_demand_only": info["service_level"] if info["demand"] > 0 else None,
                 })
+
+        svc_demand = [m["svc_demand_only"] for m in self._episode_metrics
+                    if m["svc_demand_only"] is not None]
+        if svc_demand:
+            self.logger.record("supply_chain/service_level_real",
+                            float(np.mean(svc_demand)))
 
         # Log every n steps
         if len(self._episode_metrics) >= 1000:

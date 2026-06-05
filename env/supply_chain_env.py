@@ -148,9 +148,12 @@ class SupplyChainEnv(gym.Env):
         return np.concatenate([base, dis_vec, cf_vec])
 
     def _reward(self, info: dict) -> float:
+        expected_daily_cost = (
+            self._sim_cfg["initial_inventory"] * self._sim_cfg["holding_cost"]
+        )
         service_bonus    = 5.0 * info["service_level"]
-        cost_penalty     = info["total_cost"] / 1000.0
+        cost_penalty     = 5.0 * (info["total_cost"] / expected_daily_cost)
         disruption_bonus = (1.0 if info["dis_type"] != 0
                             and info["service_level"] > 0.9 else 0.0)
         return float(np.clip(service_bonus - cost_penalty + disruption_bonus,
-                             -10.0, 10.0))
+                            -10.0, 10.0))

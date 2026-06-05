@@ -56,6 +56,7 @@ class SupplyChainEngine:
         # 3. Demand
         date   = self.dates[self.current_day]
         demand = int(self.demand_generator.sample(date) * dis.demand_mult)
+        self.demand_generator.record(date, demand)
 
         sales           = min(demand, self.inventory)
         self.inventory -= sales

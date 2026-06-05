@@ -54,8 +54,7 @@ def base_stock_action(env, target=600, reorder=200):
 
 def evaluate(cfg_path="configs/config.yaml", n_episodes=50):
     cfg           = yaml.safe_load(open(cfg_path))
-    demand_series = get_env(cfg)
-    env           = SupplyChainEnv(demand_series=demand_series, config=cfg)
+    env = get_env(cfg, seed=0)
 
     policies = {
         "Random":     None,
