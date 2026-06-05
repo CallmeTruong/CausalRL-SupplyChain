@@ -1,0 +1,15 @@
+numpy
+pandas
+lightgbm
+scikit-learn
+gymnasium
+stable-baselines3
+plotly
+streamlit
+streamlit-aggrid
+streamlit-extras
+pyvis
+graphviz
+matplotlib
+pyyaml
+pytest

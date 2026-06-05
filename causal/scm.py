@@ -98,44 +98,49 @@ class SCM:
     # Nodes in ORDER_DESCENDANTS       → calc with new order
     # ------------------------------------------------------------------
 
-    def rollout(
-        self,
-        state:          SCMState,
-        order_quantity: int,
-        dis_lead_delta: float,
-        dis_demand_mult:float,
-        capacity_ratio: float,
-        horizon:        int = 14,
-    ) -> dict:
+    def rollout(self, state, order_quantity, dis_lead_delta,
+                dis_demand_mult, capacity_ratio, horizon=14):
         inventory  = state.inventory
         backlog    = state.backlog
-        in_transit = 0.0
+        # Pipeline: list of (quantity, arrival_step)
+        pipeline   = []
 
         stockouts, inventories, costs, service_lvls = [], [], [], []
 
         for step in range(horizon):
 
-            # if not descendants → keep noise from abduction (same world)
+            # not descendants → keep same noise
             lead_time = self._lead_time(dis_lead_delta, state.noise_lead_time)
-            demand    = self._demand(state.demand_forecast, dis_demand_mult,
-                                     state.noise_demand)
+            demand    = self._demand(state.demand_forecast,
+                                    dis_demand_mult, state.noise_demand)
 
-            # descendants → recalculate do(Order = order_quantity)
+            # received from pipeline
+            received = sum(qty for qty, arr in pipeline if arr == step)
+            pipeline = [(qty, arr) for qty, arr in pipeline if arr != step]
+
+            # return backlog first
+            backlog_fulfilled = min(backlog, received)
+            backlog  -= backlog_fulfilled
+            inventory += (received - backlog_fulfilled)
+
+            # sale
+            sales     = min(demand, inventory)
+            inventory -= sales
+            stockout   = max(0.0, demand - sales)
+            backlog   += stockout
+
+            # new order — descendants of OrderQuantity
             actual_order = self._actual_order(order_quantity, capacity_ratio)
-            received     = self._received(in_transit, step, lead_time)
-            if step == 0:
-                in_transit = actual_order
+            arrival      = step + int(lead_time)
+            pipeline.append((actual_order, arrival))
 
-            stockout      = self._stockout(inventory, received, demand)
-            inventory     = self._inventory_next(inventory, received, demand)
-            backlog       = max(0.0, backlog + stockout)
-            cost          = self._total_cost(inventory, stockout, actual_order)
-            service_level = 1.0 if demand == 0 else max(0.0, 1.0 - stockout / demand)
+            cost = self._total_cost(inventory, stockout, actual_order)
+            svc  = 1.0 if demand == 0 else max(0.0, 1.0 - stockout / demand)
 
             stockouts.append(stockout)
             inventories.append(inventory)
             costs.append(cost)
-            service_lvls.append(service_level)
+            service_lvls.append(svc)
 
         return {
             "stockout_rate":   float(np.mean([s > 0 for s in stockouts])),

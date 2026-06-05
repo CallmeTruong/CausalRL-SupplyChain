@@ -82,7 +82,7 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
 
     # save checkpoint every n steps
     checkpoint_callback = CheckpointCallback(
-        save_freq   = 100_000,
+        save_freq   = 25_000,
         save_path   = "models/checkpoints/",
         name_prefix = "ppo_causal",
         verbose     = 1,
