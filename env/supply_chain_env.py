@@ -122,33 +122,28 @@ class SupplyChainEnv(gym.Env):
 
     def _get_obs(self, demand, demand_forecast, lead_time,
                 dis_lead_delta, dis_demand_mult, capacity_ratio):
-        e   = self.engine
-        gen = e.demand_generator
-
-        # max_inv = cover lead_time * max_order in worst case
-        demand_ref = max(gen.demand_mean, 1.0)
+        e          = self.engine
+        gen        = e.demand_generator
         max_lt     = self._sim_cfg["base_lead_time"] + 20
+        demand_ref = max(gen.demand_mean, 1.0)
 
-        inv_scale = demand_ref * (self._sim_cfg["base_lead_time"] + 20) * 20
-        inv_scale = max(inv_scale, self._sim_cfg["initial_inventory"] * 3)
-
-        inv_norm     = np.tanh(e.inventory / inv_scale)
-        backlog_norm = np.tanh(e.backlog   / inv_scale)
-        pipe_norm    = np.tanh(e.pipeline.total_pipeline_quantity() / inv_scale)
-        pos_norm     = np.tanh(
-            (e.inventory + e.pipeline.total_pipeline_quantity() - e.backlog) / inv_scale
+        inv_ref = max(
+            self._sim_cfg["base_lead_time"] * demand_ref * 2.0,
+            float(self._sim_cfg["initial_inventory"]),
         )
 
-        demand_ratio    = demand          / max(demand_ref, 1)
-        forecast_ratio  = demand_forecast / max(demand_ref, 1)
+        def log_norm(x):
+            return np.log1p(max(float(x), 0.0)) / np.log1p(inv_ref)
+
+        inv_pos = e.inventory + e.pipeline.total_pipeline_quantity() - e.backlog
 
         base = np.array([
-            inv_norm,
-            backlog_norm,
-            pipe_norm,
-            pos_norm,
-            demand_ratio,
-            forecast_ratio,
+            log_norm(e.inventory),
+            log_norm(e.backlog),
+            log_norm(e.pipeline.total_pipeline_quantity()),
+            log_norm(max(inv_pos, 0)),
+            demand          / max(demand_ref * 3.0, 1.0),
+            demand_forecast / max(demand_ref * 3.0, 1.0),
             lead_time       / max_lt,
             dis_lead_delta  / 20.0,
             self._step_count / self.episode_length,
@@ -171,7 +166,7 @@ class SupplyChainEnv(gym.Env):
 
         product_ctx = np.array([
             np.clip(gen.demand_cv, 0.0, 3.0),
-            np.clip(forecast_ratio / 10.0, 0.0, 1.0),
+            demand_ref / max(float(self.max_order), 1.0),
             np.clip(self._sim_cfg["base_lead_time"] / max_lt, 0.0, 1.0),
         ], dtype=np.float32)
 
@@ -179,29 +174,24 @@ class SupplyChainEnv(gym.Env):
 
 
     def _reward(self, info: dict) -> float:
-        gen         = self.engine.demand_generator
-        demand_mean = max(gen.demand_mean, 1.0)
+        gen        = self.engine.demand_generator
+        demand_ref = max(gen.demand_mean, 1.0)
 
+        target_inv = max(self._sim_cfg["base_lead_time"] * demand_ref * 2.0, 1.0)
 
-        target_inventory    = self._sim_cfg["base_lead_time"] * demand_mean * 2.0
-        baseline_daily_cost = target_inventory * self._sim_cfg["holding_cost"]
-        baseline_daily_cost = max(baseline_daily_cost, 1.0)
+        inv_ratio = max(info["inventory"], 0) / target_inv
 
-        service_bonus = 5.0 * info["service_level"]
+        # Service score: 0.0 to 2.0
+        service_score = 2.0 * info["service_level"]
 
-        # cost_penalty normalize
-        cost_penalty = 5.0 * (info["total_cost"] / baseline_daily_cost)
+        if inv_ratio <= 1.0:
+            inv_score = inv_ratio 
+        else:
+            inv_score = -2.0 * np.log(inv_ratio)
 
-        #penalty overstock
-        overstock_threshold = target_inventory * 5.0
-        overstock_penalty   = 0.0
-        if info["inventory"] > overstock_threshold:
-            excess            = info["inventory"] - overstock_threshold
-            overstock_penalty = 2.0 * (excess / overstock_threshold)
-            overstock_penalty = min(overstock_penalty, 3.0)   # cap
+        # Disruption bonus
+        dis_bonus = 0.5 if (info["dis_type"] != 0 and info["service_level"] > 0.9) else 0.0
 
-        disruption_bonus = (1.0 if info["dis_type"] != 0
-                            and info["service_level"] > 0.9 else 0.0)
+        reward = service_score + inv_score + dis_bonus
 
-        reward = service_bonus - cost_penalty - overstock_penalty + disruption_bonus
-        return float(np.clip(reward, -10.0, 10.0))
+        return float(np.clip(reward, -30.0, 3.5))
