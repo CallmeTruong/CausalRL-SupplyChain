@@ -37,10 +37,13 @@ class SupplyChainEnv(gym.Env):
         self._rng         = np.random.default_rng(seed)
 
         self._scm = SCM(
-            base_lead_time   = sim["base_lead_time"],
-            max_capacity     = sim["max_supplier_capacity"],
-            holding_cost     = sim["holding_cost"],
-            stockout_penalty = sim["stockout_penalty"],
+            base_lead_time      = sim["base_lead_time"],
+            max_capacity        = sim["max_supplier_capacity"],
+            holding_cost        = sim["holding_cost"],
+            stockout_penalty    = sim["stockout_penalty"],
+            backlog_cost        = sim.get("backlog_cost",        3.0),
+            order_cost_fixed    = sim.get("order_cost_fixed",    2.0),
+            order_cost_variable = sim.get("order_cost_variable", 0.05),
         )
         self._cf_horizon = rl["cf_horizon"]
 
@@ -81,7 +84,13 @@ class SupplyChainEnv(gym.Env):
         )
 
         # Override initial_inventory
-        sim_kwargs = {k: v for k, v in self._sim_cfg.items() if k != "episode_length"}
+        _engine_keys = {
+            "initial_inventory", "base_lead_time", "max_supplier_capacity",
+            "holding_cost", "stockout_penalty", "backlog_cost",
+            "order_cost_fixed", "order_cost_variable",
+        }
+        sim_kwargs = {k: v for k, v in self._sim_cfg.items()
+                    if k in _engine_keys}
         sim_kwargs["initial_inventory"] = item_initial_inv
 
         self.engine = SupplyChainEngine(
@@ -190,11 +199,13 @@ class SupplyChainEnv(gym.Env):
         normalized_cost = info["total_cost"] / max(expected_daily_holding, 0.1)
         cost_penalty    = np.sqrt(normalized_cost)
 
-        # Service score: 0.0 → 2.0
+        overstock         = max(0.0, self.engine.inventory - target_inv * 3.0)
+        overstock_penalty = 0.01 * overstock / max(demand_ref, 1.0)
+
         service_score = 2.0 * info["service_level"]
+        dis_bonus     = 0.5 if (info["dis_type"] != 0 and info["service_level"] > 0.9) else 0.0
 
-        # Disruption bonus
-        dis_bonus = 0.5 if (info["dis_type"] != 0 and info["service_level"] > 0.9) else 0.0
-
-        reward = service_score - cost_penalty + dis_bonus
-        return float(np.clip(reward, -30.0, 3.5))
+        return float(np.clip(
+            service_score - cost_penalty - overstock_penalty + dis_bonus,
+            -30.0, 3.5
+        ))

@@ -2,10 +2,12 @@ simulation:
   initial_inventory:     500
   base_lead_time:        7
   max_supplier_capacity: 1000
-  holding_cost:          0.5
-  stockout_penalty:      10.0
-  order_cost_fixed:      2.0
-  order_cost_variable:   0.1
+  holding_cost:          0.05
+  stockout_penalty:      75.0
+  backlog_cost:          0.20
+  order_cost_fixed:      10.0
+  order_cost_variable:   1.0
+  max_inventory:         200
   episode_length:        365
 
 disruption:
@@ -22,7 +24,6 @@ rl:
   max_order:       500
   n_order_levels:  20
   cf_horizon:      7
-
   total_timesteps: 3_000_000
   learning_rate:   0.0003
   n_steps:         2048
