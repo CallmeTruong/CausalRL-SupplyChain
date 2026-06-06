@@ -3,7 +3,7 @@ simulation:
   base_lead_time:        7
   max_supplier_capacity: 1000
   holding_cost:          0.05
-  stockout_penalty:      75.0
+  stockout_penalty:      2.5
   backlog_cost:          0.20
   order_cost_fixed:      10.0
   order_cost_variable:   1.0
