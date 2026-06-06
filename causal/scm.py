@@ -18,16 +18,22 @@ class SCM:
 
     def __init__(
         self,
-        base_lead_time    = 7,
-        max_capacity      = 1000,
-        holding_cost      = 0.5,
-        stockout_penalty  = 10.0,
+        base_lead_time      = 7,
+        max_capacity        = 1000,
+        holding_cost        = 0.05,
+        stockout_penalty    = 75.0,
+        backlog_cost        = 0.20,
+        order_cost_fixed    = 10.0,
+        order_cost_variable = 1.0,
     ):
-        self.base_lead_time   = base_lead_time
-        self.max_capacity     = max_capacity
-        self.holding_cost     = holding_cost
-        self.stockout_penalty = stockout_penalty
-        self.order_descendants = DAG.descendants("OrderQuantity")
+        self.base_lead_time      = base_lead_time
+        self.max_capacity        = max_capacity
+        self.holding_cost        = holding_cost
+        self.stockout_penalty    = stockout_penalty
+        self.backlog_cost        = backlog_cost
+        self.order_cost_fixed    = order_cost_fixed
+        self.order_cost_variable = order_cost_variable
+        self.order_descendants   = DAG.descendants("OrderQuantity")
 
     # ------------------------------------------------------------------
     # Structural equations
@@ -56,12 +62,15 @@ class SCM:
     def _stockout(self, inventory, received, demand):
         # Stockout ← InventoryNext, Demand
         return max(0.0, demand - (inventory + received))
-
-    def _total_cost(self, inventory, stockout, actual_order):
-        # TotalCost ← HoldingCost, StockoutCost, OrderCost
-        return (inventory  * self.holding_cost
-              + stockout   * self.stockout_penalty
-              + (2.0 if actual_order > 0 else 0.0))
+    
+    def _total_cost(self, inventory, stockout, actual_order, backlog):
+        return (
+            inventory    * self.holding_cost
+        + stockout     * self.stockout_penalty
+        + backlog      * self.backlog_cost
+        + (self.order_cost_fixed if actual_order > 0 else 0.0)
+        + actual_order * self.order_cost_variable
+        )
 
     # ------------------------------------------------------------------
     # step 1: Abduction — infer noise from real observation
@@ -134,7 +143,7 @@ class SCM:
             arrival      = step + int(lead_time)
             pipeline.append((actual_order, arrival))
 
-            cost = self._total_cost(inventory, stockout, actual_order)
+            cost = self._total_cost(inventory, stockout, actual_order, backlog)
             svc  = 1.0 if demand == 0 else max(0.0, 1.0 - stockout / demand)
 
             stockouts.append(stockout)
