@@ -13,9 +13,6 @@ from causal.counterfactual_engine import CounterfactualEngine
 class SupplyChainEnv(gym.Env):
 
     def __init__(self, item_df_map: dict, config: dict, seed=None):
-        """
-        item_df_map: dict[item_id -> DataFrame]
-        """
         super().__init__()
 
         sim = config["simulation"]
@@ -24,14 +21,14 @@ class SupplyChainEnv(gym.Env):
 
         self.episode_length = sim["episode_length"]
         self.max_order      = rl["max_order"]
+        self.n_order_levels = rl["n_order_levels"]
         self.order_levels   = np.linspace(0, rl["max_order"], rl["n_order_levels"], dtype=int)
 
         self.action_space      = spaces.Discrete(rl["n_order_levels"])
-        # 27 features
         self.observation_space = spaces.Box(-np.inf, np.inf,
                                             shape=(27,), dtype=np.float32)
 
-        self._item_df_map = item_df_map          # dict item_id -> df
+        self._item_df_map = item_df_map
         self._item_ids    = list(item_df_map.keys())
         self._sim_cfg     = sim
         self._dis_cfg     = dis
@@ -39,39 +36,53 @@ class SupplyChainEnv(gym.Env):
         self._seed        = seed
         self._rng         = np.random.default_rng(seed)
 
-        scm = SCM(
+        self._scm = SCM(
             base_lead_time   = sim["base_lead_time"],
             max_capacity     = sim["max_supplier_capacity"],
             holding_cost     = sim["holding_cost"],
             stockout_penalty = sim["stockout_penalty"],
         )
-        self._cf = CounterfactualEngine(
-            scm          = scm,
-            order_levels = self.order_levels,
-            horizon      = rl["cf_horizon"],
-        )
+        self._cf_horizon = rl["cf_horizon"]
 
-        self.engine         = None
-        self._step_count    = 0
-        self._last_forecast = 50.0
-        self._current_item  = None
+        self._cf                = None
+        self._item_order_levels = self.order_levels  # placeholder
+
+        self.engine        = None
+        self._step_count   = 0
+        self._current_item = None
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
 
-        # Random choose item per episode
         self._current_item = self._rng.choice(self._item_ids)
         df_history         = self._item_df_map[self._current_item]
         _seed              = int(self._rng.integers(0, 2**31))
 
         gen = DemandGenerator(
             model_path = self._model_path,
-            item_key    = self._current_item,
+            item_key   = self._current_item,
             seed       = _seed,
         )
         gen.seed_history(df_history.head(56))
+
+        demand_ref = max(gen.demand_mean, 1.0)
+
+        item_initial_inv = max(int(demand_ref * self._sim_cfg["base_lead_time"] * 2), 5)
+
+        item_max_order          = max(int(demand_ref * self._sim_cfg["base_lead_time"] * 10), 10)
+        self._item_order_levels = np.linspace(0, item_max_order, self.n_order_levels, dtype=int)
+
+        self._cf = CounterfactualEngine(
+            scm          = self._scm,
+            order_levels = self._item_order_levels,
+            horizon      = self._cf_horizon,
+        )
+
+        # Override initial_inventory
+        sim_kwargs = {k: v for k, v in self._sim_cfg.items() if k != "episode_length"}
+        sim_kwargs["initial_inventory"] = item_initial_inv
 
         self.engine = SupplyChainEngine(
             demand_generator  = gen,
@@ -80,12 +91,11 @@ class SupplyChainEnv(gym.Env):
                 mean_inter_arrival = self._dis_cfg["mean_inter_arrival"],
                 seed               = _seed,
             ),
-            **{k: v for k, v in self._sim_cfg.items() if k != "episode_length"},
+            **sim_kwargs,
             seed = _seed,
         )
         self.engine.reset()
-        self._step_count    = 0
-        self._last_forecast = gen.demand_mean
+        self._step_count = 0
 
         obs = self._get_obs(
             demand          = gen.demand_mean,
@@ -98,10 +108,8 @@ class SupplyChainEnv(gym.Env):
         return obs, {"item_id": self._current_item}
 
     def step(self, action: int):
-        order = int(self.order_levels[action])
+        order = int(self._item_order_levels[action])
         info  = self.engine.step(order)
-
-        self._last_forecast = info["demand_forecast"]
 
         obs = self._get_obs(
             demand          = float(info["demand"]),
@@ -121,15 +129,15 @@ class SupplyChainEnv(gym.Env):
     # ---------- private ----------
 
     def _get_obs(self, demand, demand_forecast, lead_time,
-                dis_lead_delta, dis_demand_mult, capacity_ratio):
+                 dis_lead_delta, dis_demand_mult, capacity_ratio):
         e          = self.engine
         gen        = e.demand_generator
         max_lt     = self._sim_cfg["base_lead_time"] + 20
         demand_ref = max(gen.demand_mean, 1.0)
 
         inv_ref = max(
-            self._sim_cfg["base_lead_time"] * demand_ref * 2.0,
-            float(self._sim_cfg["initial_inventory"]),
+            self._sim_cfg["base_lead_time"] * demand_ref * 10.0,
+            float(max(self._item_order_levels)),
         )
 
         def log_norm(x):
@@ -172,26 +180,21 @@ class SupplyChainEnv(gym.Env):
 
         return np.concatenate([base, dis_vec, cf_vec, product_ctx])
 
-
     def _reward(self, info: dict) -> float:
         gen        = self.engine.demand_generator
         demand_ref = max(gen.demand_mean, 1.0)
 
-        target_inv = max(self._sim_cfg["base_lead_time"] * demand_ref * 2.0, 1.0)
+        target_inv             = max(self._sim_cfg["base_lead_time"] * demand_ref * 2.0, 1.0)
+        expected_daily_holding = target_inv * self._sim_cfg["holding_cost"]
 
-        inv_ratio = max(info["inventory"], 0) / target_inv
+        normalized_cost = info["total_cost"] / max(expected_daily_holding, 0.1)
+        cost_penalty    = np.sqrt(normalized_cost)
 
-        # Service score: 0.0 to 2.0
+        # Service score: 0.0 → 2.0
         service_score = 2.0 * info["service_level"]
-
-        if inv_ratio <= 1.0:
-            inv_score = inv_ratio 
-        else:
-            inv_score = -2.0 * np.log(inv_ratio)
 
         # Disruption bonus
         dis_bonus = 0.5 if (info["dis_type"] != 0 and info["service_level"] > 0.9) else 0.0
 
-        reward = service_score + inv_score + dis_bonus
-
+        reward = service_score - cost_penalty + dis_bonus
         return float(np.clip(reward, -30.0, 3.5))
