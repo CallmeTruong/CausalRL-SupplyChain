@@ -85,12 +85,13 @@ class SupplyChainEnv(gym.Env):
 
         # Override initial_inventory
         _engine_keys = {
-            "initial_inventory", "base_lead_time", "max_supplier_capacity",
-            "holding_cost", "stockout_penalty", "backlog_cost",
-            "order_cost_fixed", "order_cost_variable",
+            "initial_inventory",
+            "base_lead_time",
+            "max_supplier_capacity",
+            "holding_cost",
+            "stockout_penalty",
         }
-        sim_kwargs = {k: v for k, v in self._sim_cfg.items()
-                    if k in _engine_keys}
+        sim_kwargs = {k: v for k, v in self._sim_cfg.items() if k in _engine_keys}
         sim_kwargs["initial_inventory"] = item_initial_inv
 
         self.engine = SupplyChainEngine(
