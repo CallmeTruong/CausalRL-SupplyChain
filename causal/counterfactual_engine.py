@@ -110,9 +110,9 @@ class CounterfactualEngine:
         return np.clip(np.array([
             float(np.min(stockout_rates)),
             float(np.max(service_levels)),
-            float(np.min(total_costs)) / 1000.0,
             float(stockout_rates[mid_idx]),
-            float(avg_inventories[best_idx]) / 500.0,
+            np.log1p(float(np.min(total_costs))) / np.log1p(1000.0),
+            np.log1p(float(avg_inventories[best_idx])) / np.log1p(500.0),
             cost_sens,
             float(np.mean(stockout_rates > 0.1)),
             float(self.candidates[best_idx]) / float(max(self.candidates)),
