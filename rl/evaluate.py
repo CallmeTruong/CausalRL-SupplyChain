@@ -24,6 +24,13 @@ def get_item_df_map(cfg: dict) -> dict:
         item_df_map[key] = create_features(g.copy()).reset_index(drop=True)
     return item_df_map
 
+def heuristic_action(obs, env, s=150, S=400):
+    inventory = env.engine.inventory
+    if inventory < s:
+        target = S - inventory
+        idx = int(np.argmin(np.abs(env.order_levels - target)))
+        return idx
+    return 0
 
 def run_episode(env, model=None) -> dict:
     obs, info = env.reset()
@@ -35,6 +42,8 @@ def run_episode(env, model=None) -> dict:
     while not done:
         if model is None:
             action = env.action_space.sample()
+        elif model == "heuristic":
+            action = heuristic_action(obs, env)
         else:
             action, _ = model.predict(obs, deterministic=True)
 
@@ -64,6 +73,7 @@ def evaluate(cfg_path="configs/config.yaml", n_episodes=50):
 
     policies = {
         "Random":        None,
+        "Heuristic(s,S)": "heuristic",
         "PPO_Universal": PPO.load("models/best_model"),
     }
 

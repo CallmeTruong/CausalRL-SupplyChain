@@ -81,9 +81,10 @@ def train(cfg: dict):
         }
 
     dfs = []
-    for item_id, g in df.groupby("item_id"):
-        tmp = create_features(g)
-        tmp["item_encoded"] = item_codes[item_id]
+    for (store_id, item_id), g in df.groupby(["store_id", "item_id"]):
+        key = f"{store_id}__{item_id}"
+        tmp = create_features(g.copy())
+        tmp["item_encoded"] = item_codes[key]
         dfs.append(tmp)
 
     df = pd.concat(dfs, ignore_index=True)

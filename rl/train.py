@@ -8,6 +8,7 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     BaseCallback,
 )
+from stable_baselines3.common.vec_env import VecNormalize
 
 from env.supply_chain_env import SupplyChainEnv
 from demand.lightgbm_trainer import load_m5_multi
@@ -79,8 +80,18 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
 
     print(f"Training universal agent over {len(item_df_map)} items.")
 
-    train_env = make_vec_env(make_env_fn(cfg, item_df_map, seed=42),  n_envs=4)
-    eval_env  = make_vec_env(make_env_fn(cfg, item_df_map, seed=99),  n_envs=1)
+    train_env = VecNormalize(
+        make_vec_env(make_env_fn(cfg, item_df_map, seed=42), n_envs=4),
+        norm_obs    = False,
+        norm_reward = True,
+        clip_reward = 10.0,
+    )
+    eval_env = VecNormalize(
+        make_vec_env(make_env_fn(cfg, item_df_map, seed=99), n_envs=1),
+        norm_obs    = False,
+        norm_reward = False,
+        training    = False,
+    )
 
     eval_callback = EvalCallback(
         eval_env             = eval_env,
@@ -107,6 +118,7 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
             env             = train_env,
             tensorboard_log = "logs/tensorboard/",
         )
+        train_env = VecNormalize.load("models/vecnormalize.pkl", train_env)
         steps_done      = model.num_timesteps
         steps_remaining = rl.get("total_timesteps", 1_000_000) - steps_done
         print(f"Already trained: {steps_done:,} | Remaining: {steps_remaining:,}")
@@ -136,6 +148,7 @@ def train(cfg_path="configs/config.yaml", resume_path=None):
     )
 
     model.save("models/ppo_universal_final")
+    train_env.save("models/vecnormalize.pkl")
     print("Saved → models/ppo_universal_final.zip")
 
 
