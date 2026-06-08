@@ -9,7 +9,7 @@ Demand is modeled by a LightGBM forecaster trained on the M5 Forecasting dataset
 ---
 
 ## Live Demo
-[<video src="demo/live_inference_demo.mp4" controls width="700"></video>](https://github.com/user-attachments/assets/0b53e6ab-1cd9-4592-b6d7-d9eb6e9ae22a)
+[<video src="demo/live_inference_demo.mp4"></video>](https://github.com/user-attachments/assets/0b53e6ab-1cd9-4592-b6d7-d9eb6e9ae22a)
 ## Problem Statement
 
 A retailer manages hundreds of item-store combinations. Each day, the manager must decide how many units to order from the supplier. The decision is difficult because demand is uncertain and variable, orders take several days to arrive (lead time), and the supply chain is occasionally disrupted by external events.
