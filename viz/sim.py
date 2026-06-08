@@ -5,6 +5,12 @@ If the real PPO model + env are importable, they are used instead.
 import math, random
 from dataclasses import dataclass, field
 from typing import Optional
+import yaml
+from stable_baselines3 import PPO
+from env.supply_chain_env import SupplyChainEnv
+from demand.lightgbm_trainer import load_m5_multi
+from demand.feature_engineering import create_features
+from viz import config as vcfg
 
 # ── Try to load real env (optional) ──────────────────────────────
 _REAL = False
@@ -17,12 +23,6 @@ _cfg_real = {}
 def _try_real():
     global _REAL, _model, _env_cls, _item_df_map, _item_keys_real, _cfg_real
     try:
-        import yaml
-        from stable_baselines3 import PPO
-        from env.supply_chain_env import SupplyChainEnv
-        from demand.lightgbm_trainer import load_m5_multi
-        from demand.feature_engineering import create_features
-        from viz import config as vcfg
 
         _cfg_real = yaml.safe_load(open("configs/config.yaml"))
         d = _cfg_real["demand"]
@@ -140,7 +140,6 @@ def get_item_keys():
 
 
 def make_state(item_key: str) -> VizState:
-    from viz import config as vcfg
     if not _item_df_map and not _REAL:
         _try_real()
 
