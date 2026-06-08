@@ -8,6 +8,75 @@ Demand is modeled by a LightGBM forecaster trained on the M5 Forecasting dataset
 
 ---
 
+## Problem Statement
+
+A retailer manages hundreds of item-store combinations. Each day, the manager must decide how many units to order from the supplier. The decision is difficult because demand is uncertain and variable, orders take several days to arrive (lead time), and the supply chain is occasionally disrupted by external events.
+
+Ordering too little leads to stockouts — lost sales and backlogged demand. Ordering too much accumulates inventory that costs money to hold. The goal is to find a replenishment policy that maximizes service level while keeping total cost low, across all items and stores simultaneously.
+
+This project formulates inventory management as a Markov Decision Process and trains a single universal PPO policy that generalizes across items with different demand scales, volatilities, and lead times.
+
+---
+
+## Key Variables
+
+**State variables** — observed by the agent each day:
+
+| Variable | Description |
+|---|---|
+| `inventory` | Units currently on hand |
+| `backlog` | Accumulated unmet demand not yet fulfilled |
+| `pipeline_qty` | Units ordered but not yet received (in transit) |
+| `inventory_position` | `inventory + pipeline - backlog` — the primary replenishment signal |
+| `demand` | Yesterday's realized demand |
+| `demand_forecast` | LightGBM forecast for today |
+| `lead_time` | Effective days from order to arrival (base + disruption delta) |
+
+**Disruption variables** — describe active supply chain shocks:
+
+| Variable | Description |
+|---|---|
+| `dis_type` | Type of active disruption: 0 = none, 1 = port closure, 2 = supplier failure, 3 = demand surge |
+| `dis_days_remaining` | Days until the disruption resolves |
+| `dis_lead_delta` | Extra lead time added by the disruption |
+| `capacity_ratio` | Fraction of normal supplier capacity available |
+| `demand_mult` | Multiplier on realized demand (>1 during a demand surge) |
+
+**Decision variable:**
+
+| Variable | Description |
+|---|---|
+| `order_quantity` | Units to order today. Discretized into 20 levels from 0 to `demand_mean * lead_time * 10` |
+
+**Cost variables** — components of the daily cost signal:
+
+| Variable | Description |
+|---|---|
+| `holding_cost` | `inventory * 0.05` per day |
+| `stockout_cost` | `stockout_units * 2.5` per day |
+| `order_cost` | `10 + 1.0 * order_quantity` when an order is placed |
+| `service_level` | `units_sold / demand` for the day (1.0 = fully fulfilled) |
+
+---
+
+## Causal Reasoning Module
+
+Standard RL agents react to what they observe. This project augments the observation with a causal lookahead: before deciding how much to order, the agent implicitly asks "what would happen over the next 7 days under each candidate order quantity?"
+
+This is implemented as a Structural Causal Model (SCM) following the three-step do-calculus procedure:
+
+**Step 1 — Abduction.** Given today's observation, infer the underlying noise terms that explain the current state:
+- Lead time noise = observed lead time − base lead time − disruption delta
+- Demand noise = realized demand − forecast
+
+**Step 2 — Intervention.** Fix the noise terms and simulate forward for each of the 20 candidate order quantities, treating the order as an intervention `do(order = q)`.
+
+**Step 3 — Prediction.** Run a 7-day rollout for each candidate and compute 8 aggregate statistics: minimum stockout rate, maximum service level, median-order stockout rate, minimum cost, best-order average inventory, cost sensitivity across candidates, fraction of risky orders, and the relative magnitude of the best order.
+
+These 8 values (dims 16–23 of the observation) give the agent a model-based signal about the downstream consequences of its action, without requiring the agent to learn this reasoning from scratch through trial and error alone. The causal framing ensures the forward simulation conditions correctly on the current disruption state rather than on correlates of past behavior.
+
+---
+
 ## Project Structure
 
 ```
