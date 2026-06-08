@@ -1,81 +1,236 @@
 # Supply Chain Inventory Optimization with Reinforcement Learning
 
-## Overview
+A PPO agent learns inventory replenishment policies for retail supply chains under uncertain demand, delayed deliveries, and random disruptions.
 
-A PPO agent trained to manage inventory replenishment across multiple retail items and store locations. The agent operates over 365-day episodes and learns to balance holding costs, stockout penalties, and order costs under stochastic demand and supply disruptions.
+Unlike traditional inventory control approaches that react only to current observations, the agent is augmented with a **Structural Causal Model (SCM)** that performs counterfactual reasoning. At every decision step, the SCM simulates alternative ordering actions and summarizes their future consequences into compact features that are added to the policy observation.
 
-Demand is modeled by a LightGBM forecaster trained on the M5 Forecasting dataset. The policy is universal — trained simultaneously across all item-store combinations using a 27-dimensional observation that encodes inventory state, active disruptions, and counterfactual order outcomes.
+The result is a universal inventory policy that generalizes across multiple item-store combinations while remaining robust to supply chain disruptions.
 
 ---
 
-## Live Demo
+## System Overview
+
+![System Overview](images/fig01_system_overview.png)
+
+The framework combines four major components:
+
+1. **Demand Forecasting** using LightGBM trained on the M5 dataset.
+2. **Supply Chain Simulator** modeling inventory dynamics, lead times, backlog accumulation, and disruptions.
+3. **Structural Causal Model (SCM)** for counterfactual lookahead.
+4. **PPO Policy Network** that learns replenishment decisions from both current state and future projections.
+
+---
+
+## Interactive Supply Chain Simulation
+
 https://github.com/user-attachments/assets/0b53e6ab-1cd9-4592-b6d7-d9eb6e9ae22a
-## Problem Statement
 
-A retailer manages hundreds of item-store combinations. Each day, the manager must decide how many units to order from the supplier. The decision is difficult because demand is uncertain and variable, orders take several days to arrive (lead time), and the supply chain is occasionally disrupted by external events.
+The visualization demonstrates a trained PPO policy managing inventory under stochastic demand, delayed replenishment, and supply chain disruptions.
 
-Ordering too little leads to stockouts — lost sales and backlogged demand. Ordering too much accumulates inventory that costs money to hold. The goal is to find a replenishment policy that maximizes service level while keeping total cost low, across all items and stores simultaneously.
+Displayed metrics include:
 
-This project formulates inventory management as a Markov Decision Process and trains a single universal PPO policy that generalizes across items with different demand scales, volatilities, and lead times.
+* Inventory on hand
+* Backlog
+* Pipeline inventory
+* Daily demand
+* Service level
+* Ordering decisions
+* Cumulative cost
+* Active disruptions
+
+The simulation can be paused, accelerated, reset, or subjected to manually triggered disruptions for interactive exploration.
+
+---
+
+## Problem
+
+Each day, the agent decides how many units to order.
+
+Inventory management requires balancing two competing objectives:
+
+* Ordering too little leads to stockouts, backlog accumulation, and reduced service levels.
+* Ordering too much increases holding costs and excess inventory.
+
+The challenge is amplified by:
+
+* Stochastic customer demand
+* Variable lead times
+* Capacity constraints
+* Random disruptions such as port closures, supplier failures, and demand surges
+
+The objective is to maximize service level while minimizing total inventory-related cost.
+
+### MDP Formulation
+
+**State**
+
+27-dimensional observation vector containing:
+
+* Inventory state
+* Demand information
+* Time and lead-time context
+* Disruption state
+* Counterfactual lookahead features
+* Product-specific context
+
+**Action**
+
+Order quantity discretized into 20 candidate levels and scaled per item.
+
+**Reward**
+
+Base on service_level, total_cost, overstock_penalty and disruption_bonus.
+
+---
+
+## Observation Architecture
+
+![Observation Architecture](images\fig02_policy_input_architecture.png)
+
+The observation vector is organized into six semantic groups:
+
+| Group                    | Dimensions |
+| ------------------------ | ---------- |
+| Inventory State          | 0–3        |
+| Demand                   | 4–5        |
+| Time & Lead Time         | 6–10       |
+| Disruption State         | 11–15      |
+| Counterfactual Lookahead | 16–23      |
+| Product Context          | 24–26      |
+
+Among these groups, the SCM-generated counterfactual features provide model-based foresight by estimating future inventory, stockout, service-level, and cost outcomes under alternative ordering decisions.
+
+---
+
+## Supply Chain Causal Model
+
+![Supply Chain SCM](images/fig03_causal_supply_chain_graph.png)
+
+The SCM captures how ordering decisions propagate through inventory dynamics and ultimately affect business outcomes.
+
+A change in order quantity influences:
+
+```text
+OrderQuantity
+    ↓
+ActualOrder
+    ↓
+Received
+    ↓
+Inventory
+    ↓
+Stockout
+    ↓
+Backlog
+    ↓
+Total Cost
+```
+
+while disruption variables influence lead times, supplier capacity, and demand conditions.
+
+This causal structure enables counterfactual reasoning over future supply chain trajectories.
+
+---
+
+## Counterfactual Reasoning
+
+![Counterfactual Engine](images/fig04_counterfactual_engine.png)
+
+At every environment step, the SCM evaluates multiple alternative order quantities over a 7-day horizon.
+
+The process follows the standard causal inference pipeline:
+
+### 1. Abduction
+
+Infer latent noise variables from today's observation.
+
+```text
+noise_lead_time = observed_lead_time - expected_lead_time
+
+noise_demand = observed_demand - forecast_demand
+```
+
+### 2. Intervention
+
+Apply:
+
+```text
+do(OrderQuantity = q)
+```
+
+for each candidate action while keeping inferred noise fixed.
+
+### 3. Prediction
+
+Roll the SCM forward and aggregate outcomes.
+
+Generated features include:
+
+* Minimum stockout rate
+* Maximum service level
+* Minimum expected cost
+* Cost sensitivity
+* Risky-order fraction
+* Best order ratio
+
+The counterfactual engine evaluates:
+
+```text
+20 candidate actions × 7 days
+= 140 simulated future transitions
+```
+
+per environment step.
+
+These features provide the policy with model-based foresight without explicit planning or tree search.
 
 ---
 
 ## Key Variables
 
-**State variables** — observed by the agent each day:
+| Variable           | Description                    |
+| ------------------ | ------------------------------ |
+| inventory          | Units currently on hand        |
+| backlog            | Accumulated unmet demand       |
+| pipeline_qty       | Ordered units not yet received |
+| inventory_position | inventory + pipeline − backlog |
+| lead_time          | Days until order arrival       |
+| service_level      | Fraction of demand fulfilled   |
+| holding_cost       | Inventory carrying cost        |
+| stockout_penalty   | Penalty for unmet demand       |
 
-| Variable | Description |
-|---|---|
-| `inventory` | Units currently on hand |
-| `backlog` | Accumulated unmet demand not yet fulfilled |
-| `pipeline_qty` | Units ordered but not yet received (in transit) |
-| `inventory_position` | `inventory + pipeline - backlog` — the primary replenishment signal |
-| `demand` | Yesterday's realized demand |
-| `demand_forecast` | LightGBM forecast for today |
-| `lead_time` | Effective days from order to arrival (base + disruption delta) |
+Disruption-specific variables:
 
-**Disruption variables** — describe active supply chain shocks:
-
-| Variable | Description |
-|---|---|
-| `dis_type` | Type of active disruption: 0 = none, 1 = port closure, 2 = supplier failure, 3 = demand surge |
-| `dis_days_remaining` | Days until the disruption resolves |
-| `dis_lead_delta` | Extra lead time added by the disruption |
-| `capacity_ratio` | Fraction of normal supplier capacity available |
-| `demand_mult` | Multiplier on realized demand (>1 during a demand surge) |
-
-**Decision variable:**
-
-| Variable | Description |
-|---|---|
-| `order_quantity` | Units to order today. Discretized into 20 levels from 0 to `demand_mean * lead_time * 10` |
-
-**Cost variables** — components of the daily cost signal:
-
-| Variable | Description |
-|---|---|
-| `holding_cost` | `inventory * 0.05` per day |
-| `stockout_cost` | `stockout_units * 2.5` per day |
-| `order_cost` | `10 + 1.0 * order_quantity` when an order is placed |
-| `service_level` | `units_sold / demand` for the day (1.0 = fully fulfilled) |
+* dis_type
+* capacity_ratio
+* demand_mult
+* dis_days_remaining
 
 ---
 
-## Causal Reasoning Module
+## Disruption Model
 
-Standard RL agents react to what they observe. This project augments the observation with a causal lookahead: before deciding how much to order, the agent implicitly asks "what would happen over the next 7 days under each candidate order quantity?"
+Disruptions occur with an average inter-arrival time of approximately 60 days, resulting in roughly 5–7 events per episode.
 
-This is implemented as a Structural Causal Model (SCM) following the three-step do-calculus procedure:
+| Type             | Lead Time Delta | Capacity | Demand Multiplier | Duration  |
+| ---------------- | --------------- | -------- | ----------------- | --------- |
+| Port Closure     | +10 to +20 days | 100%     | 1.0×              | 5–15 days |
+| Supplier Failure | +0 to +5 days   | 20–50%   | 1.0×              | 7–21 days |
+| Demand Surge     | 0 days          | 100%     | 1.5–3.0×          | 3–10 days |
 
-**Step 1 — Abduction.** Given today's observation, infer the underlying noise terms that explain the current state:
-- Lead time noise = observed lead time − base lead time − disruption delta
-- Demand noise = realized demand − forecast
+---
 
-**Step 2 — Intervention.** Fix the noise terms and simulate forward for each of the 20 candidate order quantities, treating the order as an intervention `do(order = q)`.
+## Results
 
-**Step 3 — Prediction.** Run a 7-day rollout for each candidate and compute 8 aggregate statistics: minimum stockout rate, maximum service level, median-order stockout rate, minimum cost, best-order average inventory, cost sensitivity across candidates, fraction of risky orders, and the relative magnitude of the best order.
+The learned PPO policy is able to:
 
-These 8 values (dims 16–23 of the observation) give the agent a model-based signal about the downstream consequences of its action, without requiring the agent to learn this reasoning from scratch through trial and error alone. The causal framing ensures the forward simulation conditions correctly on the current disruption state rather than on correlates of past behavior.
+* Maintain higher service levels during disruptions
+* Reduce stockout frequency
+* Control inventory growth
+* Balance ordering and holding costs
+* Generalize across multiple item-store combinations
+
+The SCM-enhanced policy consistently outperforms purely reactive inventory strategies because it can anticipate downstream inventory and service-level consequences before committing to an action.
 
 ---
 
@@ -120,6 +275,8 @@ These 8 values (dims 16–23 of the observation) give the agent a model-based si
 
 ---
 
+## Setup
+
 ## Installation
 
 ```bash
@@ -131,18 +288,18 @@ pip install stable-baselines3[extra] lightgbm pandas numpy gymnasium pygame pyya
 
 Python 3.10 or 3.11 recommended.
 
----
+M5 data can be downloaded from Kaggle:
 
-## Data
+https://www.kaggle.com/competitions/m5-forecasting-accuracy
 
-Download the M5 Forecasting dataset from Kaggle and place the files as follows:
+Place the following files in:
 
-| File | Path |
-|---|---|
-| `sales_train_evaluation.csv` | `data/raw/sales_train_evaluation.csv` |
-| `calendar.csv` | `data/raw/calendar.csv` |
+```text
+data/raw/sales_train_evaluation.csv
+data/raw/calendar.csv
+```
 
-To train the demand model from scratch:
+Train the demand forecasting model:
 
 ```bash
 python -c "from demand.lightgbm_trainer import train_lgbm; train_lgbm()"
@@ -150,140 +307,47 @@ python -c "from demand.lightgbm_trainer import train_lgbm; train_lgbm()"
 
 ---
 
-## Quick Start
+## Usage
 
-**Train:**
+Train from scratch:
+
 ```bash
 python rl/train.py
 ```
 
-**Resume from checkpoint:**
+Resume training:
+
 ```bash
 python rl/train.py models/checkpoints/ppo_universal_250000_steps.zip
 ```
 
-**Evaluate:**
+Evaluate policies:
+
 ```bash
 python rl/evaluate.py
 ```
 
-**Visualization:**
+Run visualization:
+
 ```bash
-python -m viz.run_viz
+python live_inference.py
 ```
 
----
-
-## Configuration
-
-All parameters are in `configs/config.yaml`. Key values:
-
-| Section | Key | Default | Description |
-|---|---|---|---|
-| simulation | `base_lead_time` | 7 | Days from order to arrival (base) |
-| simulation | `holding_cost` | 0.05 | Cost per unit held per day |
-| simulation | `stockout_penalty` | 2.5 | Cost per unit of unmet demand |
-| simulation | `episode_length` | 365 | Days per training episode |
-| disruption | `mean_inter_arrival` | 60 | Mean days between disruptions |
-| demand | `store_ids` | CA_1 … TX_2 | Stores included in training |
-| demand | `n_items` | 50 | Items per store (by descending sales) |
-| rl | `total_timesteps` | 3,000,000 | Training budget |
-| rl | `n_order_levels` | 20 | Discrete action space size |
-| rl | `cf_horizon` | 7 | Counterfactual lookahead (days) |
-
----
-
-## Environment
-
-### Action Space
-
-`Discrete(20)`. At each episode reset, order levels are scaled per item:
-
-```
-order_levels = linspace(0, demand_mean * base_lead_time * 10, 20)
-```
-
-Action 0 = hold. Action 19 = item maximum.
-
-### Observation Space (27 dimensions)
-
-| Dims | Group | Description |
-|---|---|---|
-| 0–3 | Inventory state | On-hand inventory, backlog, pipeline quantity, inventory position (all log-normalized) |
-| 4–5 | Demand | Yesterday's realized demand, LightGBM point forecast |
-| 6–8 | Time | Effective lead time, episode progress |
-| 9–10 | Seasonality | Sine/cosine encoding of day-of-week |
-| 11–15 | Disruption | Type, days remaining, lead time extension, capacity ratio, demand surge |
-| 16–23 | Counterfactual | 8 statistics from a 7-day forward simulation across candidate order levels |
-| 24–26 | Product context | Demand CV, relative demand scale, base lead time fraction |
-
-### Reward
-
-```
-reward = clip(2 * service_level - sqrt(cost / expected_cost) - overstock_penalty + disruption_bonus, -30, 3.5)
-```
-
-A disruption bonus of +0.5 is added when the agent maintains service level above 90% during an active disruption.
-
----
-
-## Disruption Model
-
-Three disruption types are sampled with mean inter-arrival of 60 days. An episode typically contains 5–7 disruptions.
-
-| Type | Lead time delta | Supplier capacity | Demand multiplier | Duration |
-|---|---|---|---|---|
-| Port closure | +10 to +20 days | unchanged | 1.0 | 5–15 days |
-| Supplier failure | +0 to +5 days | 20–50% of normal | 1.0 | 7–21 days |
-| Demand surge | 0 | unchanged | 1.5 to 3.0x | 3–10 days |
-
----
-
-## Counterfactual Module
-
-At each step, the counterfactual engine runs a 7-day forward simulation under the current disruption state for 20 candidate order levels. It uses a structural causal model (abduction → intervention → prediction) to infer noise terms from the current observation and produce 8 aggregate statistics that are appended to the observation vector.
-
-This gives the policy a model-based lookahead signal without requiring explicit planning. The tradeoff is computational: at `cf_horizon=7` with 20 candidates, this adds ~140 simulation steps per environment step and is the dominant cost in training throughput.
-
----
-
-## Evaluation
-
-Three policies are compared over 50 episodes:
-
-| Policy | Description |
-|---|---|
-| Random | Uniform random action |
-| Heuristic (s,S) | Order to level S=400 when inventory drops below s=150 |
-| PPO Universal | Trained model, deterministic inference |
-
-Note: the heuristic uses global constants not scaled per item, so performance degrades on high-demand items.
-
----
-
-## Visualization Controls
-
-| Key | Action |
-|---|---|
-| Space | Play / Pause |
-| R | Reset episode |
-| D | Trigger disruption manually |
-| Up / Down | Increase / decrease speed (1x–5x) |
-| Left / Right | Previous / next item |
-
----
-
-## TensorBoard
+TensorBoard:
 
 ```bash
 tensorboard --logdir logs/tensorboard
 ```
 
-Key metrics logged every 1000 steps:
+### Visualization Controls
 
-| Metric | Description |
-|---|---|
-| `supply_chain/service_level` | Mean fraction of demand fulfilled |
-| `supply_chain/stockout_rate` | Fraction of steps with unmet demand |
-| `supply_chain/avg_cost` | Mean total cost per step |
-| `supply_chain/disruption_pct` | Fraction of steps under active disruption |
+| Key   | Action             |
+| ----- | ------------------ |
+| Space | Play / Pause       |
+| R     | Reset              |
+| D     | Trigger disruption |
+| ↑ ↓   | Simulation speed   |
+| ← →   | Next item          |
+
+```
+```
