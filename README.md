@@ -85,7 +85,7 @@ Base on service_level, total_cost, overstock_penalty and disruption_bonus.
 
 ## Observation Architecture
 
-![Observation Architecture](images\fig02_policy_input_architecture.png)
+![Observation Architecture](images\fig02_policy_features_input.png)
 
 The observation vector is organized into six semantic groups:
 
