@@ -348,6 +348,3 @@ tensorboard --logdir logs/tensorboard
 | D     | Trigger disruption |
 | ↑ ↓   | Simulation speed   |
 | ← →   | Next item          |
-
-```
-```
