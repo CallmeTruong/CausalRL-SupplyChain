@@ -173,13 +173,6 @@ Generated features include:
 * Risky-order fraction
 * Best order ratio
 
-The counterfactual engine evaluates:
-
-```text
-20 candidate actions × 7 days
-= 140 simulated future transitions
-```
-
 per environment step.
 
 These features provide the policy with model-based foresight without explicit planning or tree search.
