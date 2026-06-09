@@ -348,3 +348,62 @@ tensorboard --logdir logs/tensorboard
 | D     | Trigger disruption |
 | ↑ ↓   | Simulation speed   |
 | ← →   | Next item          |
+ 
+
+
+## Running with Your Own Store Data
+
+The only components that touch raw data are `load_m5_multi()` in
+`demand/lightgbm_trainer.py` and `demand/demand_generator.py`.
+Everything else — simulator, environment, RL training, causal module —
+is data-independent.
+
+### Step 1 — Prepare your data
+
+Rewrite `load_m5_multi()` to return a DataFrame with these columns:
+
+| Column       | Type        | Notes                                      |
+|---|---|---|
+| `date`       | `datetime64`| One row per day, sorted, no gaps           |
+| `demand`     | `float`     | Units sold. Must be non-negative.          |
+| `store_id`   | `str`       | Location identifier                        |
+| `item_id`    | `str`       | Product identifier                         |
+| `snap`       | `int` (0/1) | Optional. Defaults to 0 if column absent.  |
+| `is_holiday` | `int` (0/1) | Optional. Defaults to 0 if column absent.  |
+
+Minimum 56 rows per item (required for lag features and history seeding).
+
+The function signature to keep:
+
+```python
+# demand/lightgbm_trainer.py
+def load_m5_multi(sales_path, calendar_path, n_items, store_ids) -> pd.DataFrame:
+    # your loading logic here
+    # must return the DataFrame schema above
+```
+
+### Step 2 — Update config.yaml
+
+```yaml
+demand:
+  sales_path:    data/raw/your_sales.csv
+  calendar_path: data/raw/your_calendar.csv   # or any unused path if you handle loading yourself
+  store_ids:     [YOUR_STORE_ID]
+  n_items:       50
+  model_path:    models/demand_lgbm.pkl
+```
+
+### Step 3 — Retrain in order
+
+```bash
+# 1. Retrain demand forecasting model
+python -c "from demand.lightgbm_trainer import train; import yaml; train(yaml.safe_load(open('configs/config.yaml')))"
+
+# 2. Retrain PPO policy
+python rl/train.py
+```
+
+Do not reuse an existing `best_model.zip` trained on different items.
+Order level scaling and demand normalization are recomputed per item at
+episode reset, so a model trained on one item set will produce incorrect
+actions on another.
