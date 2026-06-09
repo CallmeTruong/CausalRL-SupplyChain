@@ -223,8 +223,6 @@ The learned PPO policy is able to:
 * Balance ordering and holding costs
 * Generalize across multiple item-store combinations
 
-The SCM-enhanced policy consistently outperforms purely reactive inventory strategies because it can anticipate downstream inventory and service-level consequences before committing to an action.
-
 ---
 
 ## Project Structure
