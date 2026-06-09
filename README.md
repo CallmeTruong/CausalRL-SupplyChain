@@ -258,12 +258,6 @@ The SCM-enhanced policy consistently outperforms purely reactive inventory strat
 │   └── counterfactual_engine.py    # Counterfactual rollout
 ├── viz/
 │   └── run_viz.py                  # Pygame visualization
-└── notebooks/
-    ├── 01_eda_m5.ipynb
-    ├── 02_simulator_test.ipynb
-    ├── 03_disruption_analysis.ipynb
-    ├── 04_observation_space.ipynb
-    └── 05_policy_evaluation.ipynb
 ```
 
 ---
