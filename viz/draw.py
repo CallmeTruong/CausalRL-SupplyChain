@@ -262,7 +262,7 @@ def draw_cost_panel(surf, vs):
     rows  = [
         ("Holding",  vs.cum_hold_cost, cfg.C["teal"]),
         ("Stockout", vs.cum_stk_cost,  cfg.C["red"]),
-        ("Ordering", vs.cum_ord_cost,  cfg.C["blue"]),
+        ("Ordering", vs.cum_ord_cost + vs.cum_bc_cost, cfg.C["blue"]),
     ]
     bx2  = bx + 72
     bw2  = bw - 155

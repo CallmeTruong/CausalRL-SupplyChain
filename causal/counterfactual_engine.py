@@ -4,31 +4,43 @@ from causal.scm import SCM
 
 class CounterfactualEngine:
     """
-    each step:
-    1. Abduction  — infer noise from today observation
-    2. Intervention — try N order quantity level
-    3. Prediction — rollout SCM -> 8 features
+    At each environment step, generates 8 counterfactual features by:
+
+    1. Abduction  — infer noise from today's observation
+    2. Intervention — try N candidate order quantities (do(OrderQuantity = q))
+    3. Prediction  — stochastic rollout of 7-day future trajectory
+                    for each candidate, using real-world dynamics
+
+    Key invariants maintained between SCM and real environment:
+    - Cost parameters: holding_cost, stockout_penalty, backlog_cost,
+      order_cost_fixed, order_cost_variable all match real engine
+    - Demand is stochastic: drawn from N(forecast, residual_std) each step
+    - Order is placed ONCE at step 0 only (the intervention under test)
+    - Backlog is tracked across steps
+    - Lead time is fixed after abduction (intervention does not change it)
     """
 
-    def __init__(self, scm: SCM, order_levels, horizon=14):
+    def __init__(self, scm: SCM, order_levels, horizon=14, seed=None):
         self.scm        = scm
         self.horizon    = horizon
         self.candidates = order_levels
+        self.rng        = np.random.default_rng(seed)
 
     def rollout_batch(self, state, order_levels, dis_lead_delta,
-                  dis_demand_mult, capacity_ratio, horizon=7):
+                      dis_demand_mult, capacity_ratio, horizon=7):
         n = len(order_levels)
 
-        inventory  = np.full(n, state.inventory)
-        backlog    = np.full(n, state.backlog)
-
+        inventory  = np.full(n, float(state.inventory))
+        backlog    = np.full(n, float(state.backlog))
         in_transit = np.zeros(n)
 
+        # Lead time is fixed after abduction — intervention does not change it
         lead_time = self.scm._lead_time(dis_lead_delta, state.noise_lead_time)
-        demand    = self.scm._demand(state.demand_forecast,
-                                    dis_demand_mult, state.noise_demand)
-        actual_orders = np.minimum(order_levels,
-                                    self.scm.max_capacity * capacity_ratio)
+        # Capacity is fixed after abduction — intervention does not change it
+        actual_orders = np.minimum(
+            order_levels,
+            self.scm.max_capacity * capacity_ratio
+        )
 
         stockout_counts = np.zeros(n)
         total_costs     = np.zeros(n)
@@ -36,31 +48,46 @@ class CounterfactualEngine:
         inv_sum         = np.zeros(n)
 
         for step in range(horizon):
-            # received
+            # Demand is STOCHASTIC: draw fresh noise each step
+            # This matches the real environment's DemandGenerator.sample()
+            step_noise = self.rng.normal(0.0, state.residual_std, size=n)
+            demand = np.maximum(
+                0.0,
+                state.demand_forecast * dis_demand_mult
+                + state.noise_demand  # persistent deviation from forecast
+                + step_noise           # new random shock each day
+            )
+
+            # Receive: orders placed at step 0 arrive after lead_time days
             received = np.where(step == int(lead_time), in_transit, 0.0)
             if step == 0:
                 in_transit = actual_orders
 
-            # get backlog
-            bf        = np.minimum(backlog, received)
-            backlog  -= bf
-            inventory += (received - bf)
+            # Fulfill backlog first, then inventory
+            bf          = np.minimum(backlog, received)
+            backlog    -= bf
+            inventory  += (received - bf)
 
-            # sale
+            # Sales and stockout
             sales     = np.minimum(demand, inventory)
             inventory -= sales
             stockout   = np.maximum(0.0, demand - sales)
             backlog   += stockout
 
-            # new order
-            pipeline_order = actual_orders
-            arrival        = step + int(lead_time)
+            # Cost: all components match real SupplyChainEngine
+            cost = (
+                inventory   * self.scm.holding_cost
+              + stockout    * self.scm.stockout_penalty
+              + backlog     * self.scm.backlog_cost
+              + np.where(actual_orders > 0, self.scm.order_cost_fixed, 0.0)
+              + actual_orders * self.scm.order_cost_variable
+            )
 
-            cost = (inventory * self.scm.holding_cost
-                + stockout  * self.scm.stockout_penalty
-                + np.where(pipeline_order > 0, 2.0, 0.0))
-            svc  = np.where(demand == 0, 1.0,
-                            np.maximum(0.0, 1.0 - stockout / max(demand, 1)))
+            # Service level
+            svc = np.where(
+                demand == 0, 1.0,
+                np.maximum(0.0, 1.0 - stockout / np.maximum(demand, 1))
+            )
 
             stockout_counts += (stockout > 0).astype(float)
             total_costs     += cost
@@ -73,11 +100,10 @@ class CounterfactualEngine:
             "total_cost":      total_costs,
             "avg_service_lvl": total_svcs      / horizon,
         }
-    
 
     def compute(self, inventory, backlog, lead_time, demand,
-            demand_forecast, dis_lead_delta, dis_demand_mult,
-            capacity_ratio) -> np.ndarray:
+               demand_forecast, dis_lead_delta, dis_demand_mult,
+               capacity_ratio, residual_std=0.0) -> np.ndarray:
 
         state = self.scm.abduct(
             observed_inventory  = inventory,
@@ -86,6 +112,7 @@ class CounterfactualEngine:
             observed_demand     = demand,
             demand_forecast     = demand_forecast,
             dis_lead_delta      = dis_lead_delta,
+            residual_std        = residual_std,
         )
 
         results = self.rollout_batch(
@@ -97,10 +124,10 @@ class CounterfactualEngine:
             horizon         = self.horizon,
         )
 
-        stockout_rates = results["stockout_rate"]
-        service_levels = results["avg_service_lvl"]
-        total_costs    = results["total_cost"]
-        avg_inventories= results["avg_inventory"]
+        stockout_rates  = results["stockout_rate"]
+        service_levels  = results["avg_service_lvl"]
+        total_costs     = results["total_cost"]
+        avg_inventories = results["avg_inventory"]
 
         best_idx   = int(np.argmin(total_costs))
         cost_mean  = float(np.mean(total_costs))

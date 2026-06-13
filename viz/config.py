@@ -1,4 +1,5 @@
 import pygame
+import yaml
 
 C = {
     "bg":     (252, 250, 247),
@@ -13,6 +14,12 @@ C = {
     "red":    (192,  43,  43),
     "violet": (109,  57, 192),
 }
+
+try:
+    _cfg = yaml.safe_load(open("configs/config.yaml"))
+    model_path = _cfg.get("demand", {}).get("model_path", "models/best_model")
+except Exception:
+    model_path = "models/best_model"
 
 W, H = 1100, 720
 

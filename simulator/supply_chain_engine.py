@@ -12,10 +12,11 @@ class SupplyChainEngine:
         initial_inventory    = 500,
         base_lead_time       = 7,
         max_supplier_capacity= 1000,
-        holding_cost         = 0.5,
-        stockout_penalty     = 10.0,
-        order_cost_fixed     = 2.0,
-        order_cost_variable  = 0.1,
+        holding_cost         = 0.05,
+        stockout_penalty     = 2.5,
+        backlog_cost         = 0.20,
+        order_cost_fixed     = 10.0,
+        order_cost_variable  = 1.0,
         disruption_engine    = None,
         seed                 = None,
     ):
@@ -24,11 +25,12 @@ class SupplyChainEngine:
         self.initial_inventory      = initial_inventory
         self.base_lead_time         = base_lead_time
         self.max_supplier_capacity  = max_supplier_capacity
-        self.holding_cost           = holding_cost
-        self.stockout_penalty       = stockout_penalty
-        self.order_cost_fixed       = order_cost_fixed
-        self.order_cost_variable    = order_cost_variable
-        self.disruption_engine      = disruption_engine or DisruptionEngine(seed=seed)
+        self.holding_cost          = holding_cost
+        self.stockout_penalty      = stockout_penalty
+        self.backlog_cost          = backlog_cost
+        self.order_cost_fixed      = order_cost_fixed
+        self.order_cost_variable   = order_cost_variable
+        self.disruption_engine     = disruption_engine or DisruptionEngine(seed=seed)
         self.reset()
 
     def reset(self):
@@ -75,9 +77,10 @@ class SupplyChainEngine:
         # 5. Cost
         holding_cost  = self.inventory  * self.holding_cost
         stockout_cost = new_stockout    * self.stockout_penalty
+        backlog_cost  = self.backlog     * self.backlog_cost
         order_cost    = (self.order_cost_fixed + self.order_cost_variable * actual_order
                         ) if actual_order > 0 else 0.0
-        total_cost    = holding_cost + stockout_cost + order_cost
+        total_cost    = holding_cost + stockout_cost + backlog_cost + order_cost
 
         service_level   = 1.0 if demand == 0 else sales / demand
         demand_forecast = self.demand_generator.forecast(date)
@@ -104,6 +107,10 @@ class SupplyChainEngine:
             "dis_capacity_ratio": dis.capacity_ratio,
             "dis_demand_mult":    dis.demand_mult,
             "service_level":      service_level,
-            "total_cost":         total_cost,
-            "done":               done,
+            "holding_cost":      holding_cost,
+            "stockout_cost":     stockout_cost,
+            "backlog_cost":      backlog_cost,
+            "order_cost":        order_cost,
+            "total_cost":        total_cost,
+            "done":              done,
         }

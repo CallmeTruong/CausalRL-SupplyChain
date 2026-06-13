@@ -5,12 +5,13 @@ from causal.dag import DAG
 
 @dataclass
 class SCMState:
-    """Noise terms"""
+    """Noise terms and exogenous parameters"""
     inventory:        float
     backlog:          float
     demand_forecast:  float
     noise_lead_time:  float
     noise_demand:     float
+    residual_std:     float  # std of forecast residuals, used for stochastic demand sampling
 
 
 class SCM:
@@ -21,7 +22,7 @@ class SCM:
         base_lead_time      = 7,
         max_capacity        = 1000,
         holding_cost        = 0.05,
-        stockout_penalty    = 75.0,
+        stockout_penalty    = 2.5,
         backlog_cost        = 0.20,
         order_cost_fixed    = 10.0,
         order_cost_variable = 1.0,
@@ -84,6 +85,7 @@ class SCM:
         observed_demand:      float,
         demand_forecast:      float,
         dis_lead_delta:       float,
+        residual_std:         float = 0.0,
     ) -> SCMState:
         """
         Invert structural equations to solve noise.
@@ -99,6 +101,7 @@ class SCM:
             demand_forecast = demand_forecast,
             noise_lead_time = float(np.clip(noise_lt, -3.0, 3.0)),
             noise_demand    = float(np.clip(noise_d, -30.0, 30.0)),
+            residual_std    = residual_std,
         )
 
     # ------------------------------------------------------------------
@@ -111,38 +114,38 @@ class SCM:
                 dis_demand_mult, capacity_ratio, horizon=14):
         inventory  = state.inventory
         backlog    = state.backlog
-        # Pipeline: list of (quantity, arrival_step)
         pipeline   = []
 
         stockouts, inventories, costs, service_lvls = [], [], [], []
 
         for step in range(horizon):
-
-            # not descendants → keep same noise
+            # Lead time fixed after abduction (intervention does not change it)
             lead_time = self._lead_time(dis_lead_delta, state.noise_lead_time)
+            # Deterministic demand using noise baked in at abduction time
             demand    = self._demand(state.demand_forecast,
                                     dis_demand_mult, state.noise_demand)
 
-            # received from pipeline
+            # Receive from pipeline
             received = sum(qty for qty, arr in pipeline if arr == step)
             pipeline = [(qty, arr) for qty, arr in pipeline if arr != step]
 
-            # return backlog first
+            # Fulfill backlog first, then inventory
             backlog_fulfilled = min(backlog, received)
             backlog  -= backlog_fulfilled
             inventory += (received - backlog_fulfilled)
 
-            # sale
+            # Sales and stockout
             sales     = min(demand, inventory)
             inventory -= sales
             stockout   = max(0.0, demand - sales)
             backlog   += stockout
 
-            # new order — descendants of OrderQuantity
+            # New order — descendants of OrderQuantity
             actual_order = self._actual_order(order_quantity, capacity_ratio)
             arrival      = step + int(lead_time)
             pipeline.append((actual_order, arrival))
 
+            # Cost includes backlog_cost (matches SupplyChainEngine)
             cost = self._total_cost(inventory, stockout, actual_order, backlog)
             svc  = 1.0 if demand == 0 else max(0.0, 1.0 - stockout / demand)
 

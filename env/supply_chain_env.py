@@ -41,9 +41,9 @@ class SupplyChainEnv(gym.Env):
             max_capacity        = sim["max_supplier_capacity"],
             holding_cost        = sim["holding_cost"],
             stockout_penalty    = sim["stockout_penalty"],
-            backlog_cost        = sim.get("backlog_cost",        3.0),
-            order_cost_fixed    = sim.get("order_cost_fixed",    2.0),
-            order_cost_variable = sim.get("order_cost_variable", 0.05),
+            backlog_cost        = sim.get("backlog_cost",        0.20),
+            order_cost_fixed    = sim.get("order_cost_fixed",   10.0),
+            order_cost_variable = sim.get("order_cost_variable", 1.0),
         )
         self._cf_horizon = rl["cf_horizon"]
 
@@ -81,6 +81,7 @@ class SupplyChainEnv(gym.Env):
             scm          = self._scm,
             order_levels = self._item_order_levels,
             horizon      = self._cf_horizon,
+            seed         = _seed,
         )
 
         # Override initial_inventory
@@ -90,6 +91,9 @@ class SupplyChainEnv(gym.Env):
             "max_supplier_capacity",
             "holding_cost",
             "stockout_penalty",
+            "backlog_cost",
+            "order_cost_fixed",
+            "order_cost_variable",
         }
         sim_kwargs = {k: v for k, v in self._sim_cfg.items() if k in _engine_keys}
         sim_kwargs["initial_inventory"] = item_initial_inv
@@ -180,6 +184,7 @@ class SupplyChainEnv(gym.Env):
             dis_lead_delta  = dis_lead_delta,
             dis_demand_mult = dis_demand_mult,
             capacity_ratio  = capacity_ratio,
+            residual_std    = float(gen.residual_std),
         )
 
         product_ctx = np.array([

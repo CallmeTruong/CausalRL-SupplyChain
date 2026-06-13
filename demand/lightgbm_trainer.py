@@ -95,17 +95,20 @@ def train(cfg: dict):
     X_val   = df[df["date"] >  cutoff][MULTI_FEATURE_COLS]
     y_val   = df[df["date"] >  cutoff]["demand"]
 
+    lgbm_cfg = d
     model = lgb.LGBMRegressor(
-        n_estimators  = 500,
-        learning_rate = 0.05,
-        num_leaves    = 63,
+        n_estimators  = lgbm_cfg.get("lgbm_n_estimators",   500),
+        learning_rate = lgbm_cfg.get("lgbm_learning_rate",    0.05),
+        num_leaves    = lgbm_cfg.get("lgbm_num_leaves",      63),
         random_state  = 42,
         verbosity     = -1,
     )
     model.fit(
         X_train, y_train,
         eval_set  = [(X_val, y_val)],
-        callbacks = [lgb.early_stopping(50, verbose=False)],
+        callbacks = [lgb.early_stopping(
+            lgbm_cfg.get("lgbm_early_stopping", 50), verbose=False
+        )],
     )
 
     residuals    = y_val.values - model.predict(X_val)

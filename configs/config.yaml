@@ -20,6 +20,12 @@ demand:
   n_items:       50
   model_path:    "models/demand_lgbm.pkl"
 
+  # LightGBM hyperparameters
+  lgbm_n_estimators:   500
+  lgbm_learning_rate:   0.05
+  lgbm_num_leaves:     63
+  lgbm_early_stopping: 50
+
 rl:
   max_order:       500
   n_order_levels:  20
