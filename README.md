@@ -173,13 +173,6 @@ Generated features include:
 * Risky-order fraction
 * Best order ratio
 
-The counterfactual engine evaluates:
-
-```text
-20 candidate actions × 7 days
-= 140 simulated future transitions
-```
-
 per environment step.
 
 These features provide the policy with model-based foresight without explicit planning or tree search.
@@ -230,8 +223,6 @@ The learned PPO policy is able to:
 * Balance ordering and holding costs
 * Generalize across multiple item-store combinations
 
-The SCM-enhanced policy consistently outperforms purely reactive inventory strategies because it can anticipate downstream inventory and service-level consequences before committing to an action.
-
 ---
 
 ## Project Structure
@@ -265,12 +256,6 @@ The SCM-enhanced policy consistently outperforms purely reactive inventory strat
 │   └── counterfactual_engine.py    # Counterfactual rollout
 ├── viz/
 │   └── run_viz.py                  # Pygame visualization
-└── notebooks/
-    ├── 01_eda_m5.ipynb
-    ├── 02_simulator_test.ipynb
-    ├── 03_disruption_analysis.ipynb
-    ├── 04_observation_space.ipynb
-    └── 05_policy_evaluation.ipynb
 ```
 
 ---
